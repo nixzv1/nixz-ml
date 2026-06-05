@@ -1817,7 +1817,7 @@ def do_ban_check(user_input, pw):
 def format_ban_result_msg(login, pw, d):
     sep       = "━━━━━━━━━━━━━━━━━━━━━━━━"
     is_banned = d["is_banned"]
-    tag       = "🔴 BANNED" if is_banned else "🟢 NOT BANNED"
+    tag       = "BANNED" if is_banned else "NOT BANNED"
     lines = [
         sep,
         f"  <b>BAN CHECK — {tag}</b>",
@@ -1830,7 +1830,7 @@ def format_ban_result_msg(login, pw, d):
         f"  <b>Role ID :</b> {d['role_id']}",
         f"  <b>Zone ID :</b> {d['zone_id']}",
         f"  <b>GUID    :</b> {d['guid']}",
-        f"  <b>Rank    :</b> {d['current_rank']} (Best: {d['highest_rank']})",
+        f"  <b>Rank    :</b> {d['current_rank']} (Highest: {d['highest_rank']})",
         f"  <b>Bindings:</b> {d['bindings']}",
         f"  <b>Accounts:</b> {d['account_count']} on this login",
         "",
@@ -1845,7 +1845,7 @@ def format_ban_result_msg(login, pw, d):
     lines += [
         "",
         sep,
-        "  <b>⚠ NOTE:</b> This ban check is ~90% accurate.",
+        "  <b>NOTE:</b> This ban check is ~90% accurate.",
         "  It detects bans caused by cheat/hack tools.",
         "  It cannot detect bans via 3rd-party plugins",
         "  or manual enforcement by Moonton.",
@@ -1898,7 +1898,7 @@ async def receive_ban_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "  Use <b>[ REFERRAL ]</b> to earn more.",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("[ BACK ]", callback_data="main_menu")]]))
+                    [[InlineKeyboardButton("[ BACK ]", callback_data="back_main")]]))
             return ConversationHandler.END
         if not prem:
             user["ban_checks_remaining"] = max(0, ban_left - 1)
@@ -1924,14 +1924,14 @@ async def receive_ban_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("[ TRY AGAIN ]", callback_data="ban_check")],
-                 [InlineKeyboardButton("[ BACK ]",      callback_data="main_menu")]]))
+                 [InlineKeyboardButton("[ BACK ]",      callback_data="back_main")]]))
     else:
         msg = format_ban_result_msg(login, pw, result)
         await update.message.reply_text(
             msg, parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("[ CHECK ANOTHER ]", callback_data="ban_check")],
-                 [InlineKeyboardButton("[ BACK ]",          callback_data="main_menu")]]))
+                 [InlineKeyboardButton("[ BACK ]",          callback_data="back_main")]]))
 
     context.user_data.pop("awaiting_ban", None)
     return ConversationHandler.END
@@ -2362,7 +2362,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"  Premium: <b>unlimited</b>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("[ CANCEL ]", callback_data="main_menu")]]))
+                [[InlineKeyboardButton("[ CANCEL ]", callback_data="back_main")]]))
         context.user_data["awaiting_ban"] = True
         return AWAITING_BAN_INPUT
 
@@ -3066,25 +3066,30 @@ async def receive_check_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
             db_set = set(db2["combo_database"])
         cleaned = [l for l in lines if l not in db_set]
         removed = len(lines) - len(cleaned)
-        import uuid as _uuid
-        job_key = str(_uuid.uuid4())[:8]
-        context.user_data[f"dedup_job_{job_key}"] = {
-            "cleaned": cleaned,
-            "removed": removed,
-            "original": len(lines),
-        }
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Yes, send cleaned file", callback_data=f"confirm_dedup_{job_key}")],
-            [InlineKeyboardButton("Cancel", callback_data="cancel_dedup")],
-        ])
-        await update.message.reply_text(
-            f"<b>[ SCAN COMPLETE ]</b>\n{sep}\n\n"
-            f"Original combos: {len(lines):,}\n"
-            f"Already checked (will be removed): {removed:,}\n"
-            f"Remaining: {len(cleaned):,}\n\n"
-            f"Do you want to receive the cleaned file?",
+        if not cleaned:
+            await update.message.reply_text(
+                f"<b>[ SCAN COMPLETE ]</b>\n{sep}\n\n"
+                f"Original combos: {len(lines):,}\n"
+                f"Already checked: {removed:,}\n"
+                f"Remaining: <b>0</b>\n\n"
+                f"All accounts in your file are already in the database. Nothing to send.",
+                parse_mode="HTML",
+                reply_markup=back_keyboard()
+            )
+            return ConversationHandler.END
+        out_bytes = "\n".join(cleaned).encode("utf-8")
+        out_buf = io.BytesIO(out_bytes)
+        out_buf.name = "cleaned_combo.txt"
+        await update.message.reply_document(
+            document=out_buf,
+            caption=(
+                f"<b>[ COMBO CLEANED ]</b>\n{sep}\n\n"
+                f"Original: {len(lines):,}\n"
+                f"Already checked (removed): {removed:,}\n"
+                f"Remaining (not in DB): <b>{len(cleaned):,}</b>"
+            ),
             parse_mode="HTML",
-            reply_markup=kb
+            reply_markup=back_keyboard()
         )
         return ConversationHandler.END
 
