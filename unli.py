@@ -33,7 +33,7 @@ TOKEN    = "8708139714:AAHgYyAfo4riaCvkCK-LmpBBlEOL1HDErwQ"
 ADMIN_ID = 5674812663
 CHANNEL  = "nixzllss"
 
-API_URL      = "http://5.189.140.181:8000/check"
+API_URL      = "http://144.91.112.169:4040/check"
 AKAMAI_API   = "http://80.241.218.98:5050/api/status"
 CN31_API     = "http://144.91.112.169:7070/stats"
 
