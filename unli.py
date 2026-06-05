@@ -33,7 +33,7 @@ TOKEN    = "8708139714:AAHgYyAfo4riaCvkCK-LmpBBlEOL1HDErwQ"
 ADMIN_ID = 5674812663
 CHANNEL  = "nixzllss"
 
-API_URL      = "http://144.91.112.169:4040/check"
+API_URL      = "http://5.189.140.181:8000/check"
 AKAMAI_API   = "http://80.241.218.98:5050/api/status"
 CN31_API     = "http://144.91.112.169:7070/stats"
 
@@ -679,7 +679,7 @@ def deduct_checks(user, amount):
     else:
         user["free_checks_remaining"] = max(0, user["free_checks_remaining"] - amount)
 
-def generate_key(db, duration_value, duration_unit, max_users=1, custom_key=None):
+def generate_key(db, duration_value, duration_unit, max_users=1, custom_key=None, key_type="full"):
     key_str = custom_key if custom_key else f"NIXSZ-{str(uuid.uuid4())[:8].upper()}"
     now = datetime.now()
     unit_map = {
@@ -699,6 +699,7 @@ def generate_key(db, duration_value, duration_unit, max_users=1, custom_key=None
         "created_at": now.isoformat(),
         "duration_seconds": int(delta.total_seconds()),
         "active": True,
+        "key_type": key_type,
     }
     return key_str
 
@@ -712,13 +713,16 @@ def redeem_key(db, uid, key_str):
     if uid in key_data["used_by"]:
         return False, " You already used this key."
     if len(key_data["used_by"]) >= key_data["max_users"]:
-        return False, "⏳ Key already in use (max users reached)."
+        return False, " Key already in use (max users reached)."
     user = get_user(db, uid)
+    key_type = key_data.get("key_type", "full")
     user["is_premium"] = True
+    user["premium_key_type"] = key_type
     exp  = datetime.now() + timedelta(seconds=key_data["duration_seconds"])
     user["premium_expires"] = exp.isoformat()
     key_data["used_by"].append(uid)
-    return True, f" Key activated! Premium expires: {exp.strftime('%Y-%m-%d %H:%M')}"
+    type_label = {"ban": "Ban Check Only", "semi": "Full Info Only", "full": "Full Access"}.get(key_type, "Full Access")
+    return True, f" Key activated!\nAccess: <b>{type_label}</b>\nExpires: {exp.strftime('%Y-%m-%d %H:%M')}"
 
 BINDING_MAP = {
     "mt-and_":         "Moonton",
@@ -1900,12 +1904,10 @@ async def receive_ban_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=InlineKeyboardMarkup(
                     [[InlineKeyboardButton("[ BACK ]", callback_data="back_main")]]))
             return ConversationHandler.END
-        if not prem:
-            user["ban_checks_remaining"] = max(0, ban_left - 1)
         save_db(db)
 
     wait_msg = await update.message.reply_text(
-        "⏳ Fetching tokens and checking ban status...")
+        "Fetching tokens and checking ban status...")
 
     def _run():
         return do_ban_check(login, pw)
@@ -1926,6 +1928,12 @@ async def receive_ban_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [[InlineKeyboardButton("[ TRY AGAIN ]", callback_data="ban_check")],
                  [InlineKeyboardButton("[ BACK ]",      callback_data="back_main")]]))
     else:
+        with data_lock:
+            db2   = get_db()
+            user2 = get_user(db2, uid)
+            if not is_premium(user2):
+                user2["ban_checks_remaining"] = max(0, user2.get("ban_checks_remaining", 0) - 1)
+            save_db(db2)
         msg = format_ban_result_msg(login, pw, result)
         await update.message.reply_text(
             msg, parse_mode="HTML",
@@ -2597,6 +2605,26 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return ConversationHandler.END
         await query.edit_message_text(
             f" <b>GENERATE KEY</b>\n{sep}\n\n"
+            f"What type of key do you want to generate?",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Ban Check Only", callback_data="genkey_type_ban")],
+                [InlineKeyboardButton("Full Info Only", callback_data="genkey_type_semi")],
+                [InlineKeyboardButton("Both (Full Access)", callback_data="genkey_type_full")],
+                [InlineKeyboardButton("Back to Admin", callback_data="admin_panel")],
+            ])
+        )
+        return ConversationHandler.END
+
+    if data.startswith("genkey_type_"):
+        if uid != ADMIN_ID:
+            return ConversationHandler.END
+        key_type = data.replace("genkey_type_", "")
+        type_label = {"ban": "Ban Check Only", "semi": "Full Info Only", "full": "Both (Full Access)"}.get(key_type, "Full Access")
+        context.user_data["awaiting_genkey"] = True
+        context.user_data["genkey_type"] = key_type
+        await query.edit_message_text(
+            f" <b>GENERATE KEY — {type_label}</b>\n{sep}\n\n"
             f"Send key details in this format:\n\n"
             f"<code>duration_value duration_unit max_users [custom_key]</code>\n\n"
             f"Examples:\n"
@@ -2608,7 +2636,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
             reply_markup=back_admin_keyboard()
         )
-        context.user_data["awaiting_genkey"] = True
         return AWAITING_GENKEY_INPUT
 
     if data == "admin_listkeys":
@@ -2618,11 +2645,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keys = db2.get("keys", {})
         msg  = f" <b>ALL KEYS ({len(keys)})</b>\n{sep}\n\n"
         for k, kd in list(keys.items())[:15]:
-            used   = len(kd.get("used_by", []))
-            max_u  = kd.get("max_users", 1)
-            active = "" if kd.get("active") else ""
-            dur    = f"{kd.get('duration_value', '?')} {kd.get('duration_unit', '')}"
-            msg   += f"{active} <code>{k}</code>\n   {dur} | {used}/{max_u} users\n"
+            used       = len(kd.get("used_by", []))
+            max_u      = kd.get("max_users", 1)
+            active     = "" if kd.get("active") else ""
+            dur        = f"{kd.get('duration_value', '?')} {kd.get('duration_unit', '')}"
+            ktype      = {"ban": "Ban Only", "semi": "Full Info Only", "full": "Full Access"}.get(kd.get("key_type", "full"), "Full Access")
+            msg       += f"{active} <code>{k}</code>\n   {dur} | {used}/{max_u} users | {ktype}\n"
         if not keys:
             msg += "No keys generated."
         await query.edit_message_text(msg, parse_mode="HTML", reply_markup=back_admin_keyboard())
@@ -3689,6 +3717,8 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if context.user_data.get("awaiting_genkey") and uid == ADMIN_ID:
         context.user_data["awaiting_genkey"] = False
+        key_type   = context.user_data.pop("genkey_type", "full")
+        type_label = {"ban": "Ban Check Only", "semi": "Full Info Only", "full": "Both (Full Access)"}.get(key_type, "Full Access")
         parts = text.split()
         try:
             dur_val  = int(parts[0])
@@ -3697,11 +3727,12 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             custom_k = parts[3] if len(parts) > 3 else None
             with data_lock:
                 db  = get_db()
-                key = generate_key(db, dur_val, dur_unit, max_u, custom_k)
+                key = generate_key(db, dur_val, dur_unit, max_u, custom_k, key_type)
                 save_db(db)
             await update.message.reply_text(
                 f" <b>Key Generated!</b>\n\n"
                 f" <code>{key}</code>\n\n"
+                f"Type: <b>{type_label}</b>\n"
                 f"Duration: {dur_val} {dur_unit}\n"
                 f"Max Users: {max_u}",
                 parse_mode="HTML",
