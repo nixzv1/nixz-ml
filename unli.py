@@ -3427,54 +3427,51 @@ async def receive_check_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     file = await context.bot.get_file(doc.file_id)
 
-    # ── Animated download bar ─────────────────────────────────────────────────
-    def _bar(filled, total=10):
-        return "█" * filled + "░" * (total - filled)
+    def _dlbar(n, w=10):
+        return "█" * n + "░" * (w - n)
 
     dl_msg = await update.message.reply_text(
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"  <b>DOWNLOADING</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"  [{_bar(0)}]  0%\n"
+        f"  [{_dlbar(0)}]  0%\n"
         f"  {doc.file_name}",
         parse_mode="HTML"
     )
 
-    # Animate bar while downloading
-    async def _animate():
-        for i in range(1, 10):
-            await asyncio.sleep(0.18)
-            try:
-                await dl_msg.edit_text(
-                    f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"  <b>DOWNLOADING</b>\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                    f"  [{_bar(i)}]  {i * 10}%\n"
-                    f"  {doc.file_name}",
-                    parse_mode="HTML"
-                )
-            except Exception:
-                pass
+    download_task = asyncio.create_task(file.download_as_bytearray())
 
-    anim_task = asyncio.create_task(_animate())
-    buf       = await file.download_as_bytearray()
-    anim_task.cancel()
+    for _i in range(1, 10):
+        await asyncio.sleep(0.12)
+        if download_task.done():
+            break
+        try:
+            await dl_msg.edit_text(
+                f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"  <b>DOWNLOADING</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"  [{_dlbar(_i)}]  {_i * 10}%\n"
+                f"  {doc.file_name}",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
 
-    # Show 100% briefly then delete
+    buf = await download_task
+
     try:
         await dl_msg.edit_text(
             f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"  <b>DOWNLOADING</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"  [{_bar(10)}]  100%\n"
+            f"  [{_dlbar(10)}]  100%\n"
             f"  {doc.file_name}",
             parse_mode="HTML"
         )
-        await asyncio.sleep(0.6)
+        await asyncio.sleep(0.5)
         await dl_msg.delete()
     except Exception:
         pass
-    # ─────────────────────────────────────────────────────────────────────────
 
     raw_text = buf.decode("utf-8", errors="ignore")
 
@@ -3590,11 +3587,13 @@ async def receive_check_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
         prem = is_premium(user)
         save_db(db)
 
+    S1 = "━━━━━━━━━━━━━━━━━━━━━━━━"
+    S2 = "────────────────────────"
+
     status_msg = await update.message.reply_text(
-        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"  <b>PROCESSING</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"  Parsing combos...",
+        f"{S1}\n  <b>FILE RECEIVED</b>\n{S1}\n\n"
+        f"  Processing combo...\n"
+        f"  Checking server stock...",
         parse_mode="HTML"
     )
 
@@ -3602,7 +3601,10 @@ async def receive_check_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     if not all_lines:
         await status_msg.edit_text(
-            " No valid accounts found in file (format: email:password).",
+            f"{S1}\n  <b>FILE ERROR</b>\n{S1}\n\n"
+            f"  No valid accounts found.\n"
+            f"  Format: <code>email:password</code> per line.",
+            parse_mode="HTML",
             reply_markup=back_keyboard()
         )
         return ConversationHandler.END
@@ -3617,10 +3619,35 @@ async def receive_check_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
             combos.append((lo, pw))
 
     if not combos:
-        await status_msg.edit_text(" No valid combos found.", reply_markup=back_keyboard())
+        await status_msg.edit_text(
+            f"{S1}\n  <b>FILE ERROR</b>\n{S1}\n\n  No valid combos found.",
+            parse_mode="HTML",
+            reply_markup=back_keyboard()
+        )
         return ConversationHandler.END
 
     total_raw = len(combos)
+    leftover  = []
+
+    if total_raw > MAX_COMBO_LINES:
+        leftover  = combos[MAX_COMBO_LINES:]
+        combos    = combos[:MAX_COMBO_LINES]
+        total_raw = len(combos)
+        leftover_text = "\n".join(f"{lo}:{pw}" for lo, pw in leftover)
+        leftover_buf  = io.BytesIO(leftover_text.encode("utf-8"))
+        leftover_buf.name = "leftover_combos.txt"
+        await update.message.reply_document(
+            document=leftover_buf,
+            caption=(
+                f"{S1}\n  <b>LEFTOVER COMBOS</b>\n{S1}\n\n"
+                f"  File had <b>{total_raw + len(leftover):,}</b> combos.\n"
+                f"  Limit: <b>{MAX_COMBO_LINES:,}</b> per session.\n\n"
+                f"  First <b>{MAX_COMBO_LINES:,}</b> will be checked now.\n"
+                f"  Remaining <b>{len(leftover):,}</b> returned here.\n"
+                f"  Send this file again to check the rest."
+            ),
+            parse_mode="HTML"
+        )
 
     if not prem:
         with data_lock:
@@ -3633,11 +3660,12 @@ async def receive_check_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         if total_avail <= 0:
             await status_msg.edit_text(
-                f" <b>No free checks remaining!</b>\n\n"
-                f"Your daily limit resets every 24 hours.\n"
-                f"Use referrals to get more free checks.\n"
-                f"Buy premium for unlimited checking.\n\n"
-                f"Contact @nixzlls to buy premium.",
+                f"{S1}\n  <b>NO CHECKS REMAINING</b>\n{S1}\n\n"
+                f"  Your daily limit has been reached.\n"
+                f"  Resets every 24 hours.\n\n"
+                f"  Use referrals to earn free checks.\n"
+                f"  Buy premium for unlimited checking.\n\n"
+                f"  Contact <b>@nixzlls</b> to purchase.",
                 parse_mode="HTML",
                 reply_markup=back_keyboard()
             )
@@ -3658,6 +3686,21 @@ async def receive_check_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data[f"scan_prem_{scan_key}"] = prem
     context.user_data[f"scan_chat_{scan_key}"] = chat_id
 
+    ak_pool, cn_pool, ak_ok, cn_ok = await asyncio.to_thread(fetch_stock_summary)
+
+    ak_tag = "ONLINE" if ak_ok else "LOW / OFFLINE"
+    cn_tag = "ONLINE" if cn_ok else "LOW / OFFLINE"
+
+    stock_warn = ""
+    if not ak_ok or not cn_ok:
+        stock_warn = (
+            f"\n{S2}\n"
+            f"  LOW STOCK WARNING\n"
+            f"  Accounts may return INVALID\n"
+            f"  or ERROR. Wait for stock refill\n"
+            f"  before sending large combos.\n"
+        )
+
     kb_scan = InlineKeyboardMarkup([
         [InlineKeyboardButton("[ YES — SCAN & REMOVE DUPES ]", callback_data=f"prescan_yes_{scan_key}")],
         [InlineKeyboardButton("[ NO — CHECK ALL ]",            callback_data=f"prescan_no_{scan_key}")],
@@ -3665,13 +3708,23 @@ async def receive_check_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
     ])
 
     await status_msg.edit_text(
-        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{S1}\n"
         f"  <b>FILE LOADED</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"Combos loaded: <b>{total_raw:,}</b>\n"
-        f"Accounts in database: <b>{db_count:,}</b>\n\n"
-        f"Do you want to scan your combo against the database first?\n\n"
-        f"If yes, accounts already in the database will be removed from your list and sent back to you separately, then the remaining ones will be checked.",
+        f"{S1}\n\n"
+        f"  Combos:   <b>{total_raw:,}</b>\n"
+        f"  Limit:    <b>{MAX_COMBO_LINES:,}</b>\n"
+        f"  Database: <b>{db_count:,}</b>\n"
+        f"\n{S2}  <b>SERVER STOCK</b>\n"
+        f"  Akamai  {ak_tag} — {ak_pool}\n"
+        f"  CN31    {cn_tag} — {cn_pool}\n"
+        f"{S2}\n"
+        f"  1 CN31 token = 1 account\n"
+        f"  1 Akamai token = 5 accounts\n"
+        f"{stock_warn}"
+        f"\n{S2}\n"
+        f"  Scan combo against database first?\n"
+        f"  Duplicates removed and returned\n"
+        f"  to you as a separate file.",
         parse_mode="HTML",
         reply_markup=kb_scan
     )
@@ -3706,51 +3759,52 @@ async def receive_semi_email(update: Update, context: ContextTypes.DEFAULT_TYPE)
         total_avail = free_rem + ref_pts
         save_db(db)
 
-    status_msg = await update.message.reply_text("Downloading file...")
+    status_msg = await update.message.reply_text("Processing...")
 
     file = await context.bot.get_file(doc.file_id)
 
-    def _bar2(filled, total=10):
-        return "█" * filled + "░" * (total - filled)
+    def _dlbar2(n, w=10):
+        return "█" * n + "░" * (w - n)
 
     dl_msg2 = await update.message.reply_text(
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"  <b>DOWNLOADING</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"  [{_bar2(0)}]  0%\n"
+        f"  [{_dlbar2(0)}]  0%\n"
         f"  {doc.file_name}",
         parse_mode="HTML"
     )
 
-    async def _animate2():
-        for i in range(1, 10):
-            await asyncio.sleep(0.18)
-            try:
-                await dl_msg2.edit_text(
-                    f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"  <b>DOWNLOADING</b>\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                    f"  [{_bar2(i)}]  {i * 10}%\n"
-                    f"  {doc.file_name}",
-                    parse_mode="HTML"
-                )
-            except Exception:
-                pass
+    dl_task2 = asyncio.create_task(file.download_as_bytearray())
 
-    anim_task2 = asyncio.create_task(_animate2())
-    buf        = await file.download_as_bytearray()
-    anim_task2.cancel()
+    for _j in range(1, 10):
+        await asyncio.sleep(0.12)
+        if dl_task2.done():
+            break
+        try:
+            await dl_msg2.edit_text(
+                f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"  <b>DOWNLOADING</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"  [{_dlbar2(_j)}]  {_j * 10}%\n"
+                f"  {doc.file_name}",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+
+    buf = await dl_task2
 
     try:
         await dl_msg2.edit_text(
             f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"  <b>DOWNLOADING</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"  [{_bar2(10)}]  100%\n"
+            f"  [{_dlbar2(10)}]  100%\n"
             f"  {doc.file_name}",
             parse_mode="HTML"
         )
-        await asyncio.sleep(0.6)
+        await asyncio.sleep(0.5)
         await dl_msg2.delete()
     except Exception:
         pass
