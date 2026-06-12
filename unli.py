@@ -1257,6 +1257,24 @@ def build_final_summary(st_obj, stopped=False):
     return msg
 
 
+COLLECTOR_TIER_ORDER = [
+    "World Collector",
+    "Mega Collector",
+    "Exalted Collector",
+    "Renowned Collector",
+    "Expert Collector",
+    "Seasoned Collector",
+    "Junior Collector",
+    "Amateur Collector",
+    "No Tier",
+]
+
+def _collector_tier_sort_key(tier_name):
+    try:
+        return COLLECTOR_TIER_ORDER.index(tier_name)
+    except ValueError:
+        return len(COLLECTOR_TIER_ORDER)
+
 def build_stats_msg(st_obj):
     v   = st_obj["valid"]
     iv  = st_obj["invalid"]
@@ -1272,6 +1290,7 @@ def build_stats_msg(st_obj):
 
     elapsed = time.time() - st_obj["start_time"]
     rate    = ch / elapsed if elapsed > 0 else 0
+    cpm     = rate * 60
     eta     = (t - ch) / rate if rate > 0 and ch < t else 0
     h = int(elapsed // 3600)
     m = int((elapsed % 3600) // 60)
@@ -1309,28 +1328,19 @@ def build_stats_msg(st_obj):
     msg += f"  UserPass   <code>{mb(usp,max(v,1))}</code>  {usp}\n"
     msg += f"{sep}\n"
     msg += f"<b>Rate</b>     {rate:.2f} acc/s\n"
+    msg += f"<b>CPM</b>      {cpm:.1f}/min\n"
     msg += f"<b>ETA</b>      {eta_str}\n"
     msg += f"<b>Elapsed</b>  {elapsed_str}\n"
 
     collector_stats = st_obj.get("collector_stats", {})
-    collector_order = ["World","Mega","Exalted","Renowned","Collector","Epic","Special","Elite","Rare","Normal"]
-    col_lines = ""
-    for ct in collector_order:
-        cnt = collector_stats.get(ct, 0)
-        if cnt > 0:
-            col_lines += f"  {ct}: {cnt}\n"
-    if col_lines:
-        msg += f"{sep}\n<b>Collector Tier</b>\n{col_lines}"
-
-    rank_counts = st_obj.get("rank_counts", {})
-    rank_order  = ["Mythic","Legend","Epic","Grandmaster","Master","Elite","Warrior"]
-    rank_lines  = ""
-    for rk in rank_order:
-        cnt = rank_counts.get(rk, 0)
-        if cnt > 0:
-            rank_lines += f"  {rk}: {cnt}\n"
-    if rank_lines:
-        msg += f"{sep}\n<b>Rank</b>\n{rank_lines}"
+    if collector_stats:
+        sorted_tiers = sorted(collector_stats.items(), key=lambda x: _collector_tier_sort_key(x[0]))
+        col_lines = ""
+        for ct, cnt in sorted_tiers:
+            if cnt > 0:
+                col_lines += f"  {ct}: {cnt}\n"
+        if col_lines:
+            msg += f"{sep}\n<b>Collector Tier</b>\n{col_lines}"
 
     msg += f"\n{'checking...' if not done else 'complete'}"
     return msg
@@ -1347,9 +1357,12 @@ def update_stats_after_hit(st_obj, display_rank, collector_tier, region, name, l
         st_obj["top_accounts"].append({"ign": name, "level": lvl, "country": region, "rank": display_rank})
         st_obj["top_accounts"].sort(key=lambda x: x["level"], reverse=True)
         st_obj["top_accounts"] = st_obj["top_accounts"][:5]
-        if collector_tier and collector_tier != "N/A":
+        major = "No Tier"
+        if collector_tier and collector_tier not in ("N/A", ""):
             major = collector_tier.split(" V")[0].split(" IV")[0].split(" III")[0].split(" II")[0].split(" I")[0].rstrip()
-            st_obj["collector_stats"][major] = st_obj["collector_stats"].get(major, 0) + 1
+            if not major:
+                major = "No Tier"
+        st_obj["collector_stats"][major] = st_obj["collector_stats"].get(major, 0) + 1
 
 def fetch_stock_summary():
     ak_pool = "N/A"
@@ -1380,36 +1393,52 @@ def fetch_stock_summary():
 
 
 def fetch_akamai_stock():
-    try:
-        r = requests.get(AKAMAI_API, timeout=6)
-        d = r.json()
-        pool   = d.get("pool_size", "?")
-        served = d.get("tokens_served", "?")
-        rate   = d.get("rate_per_min", "?")
-        uptime = int(d.get("uptime_minutes") or 0)
-        return pool, served, rate, uptime
-    except requests.exceptions.ConnectTimeout:
-        return "OFFLINE", "OFFLINE", "OFFLINE", 0
-    except requests.exceptions.ConnectionError:
-        return "UNREACHABLE", "UNREACHABLE", "UNREACHABLE", 0
-    except Exception:
-        return "N/A", "N/A", "N/A", 0
+    for attempt in range(2):
+        try:
+            r = requests.get(AKAMAI_API, timeout=15)
+            d = r.json()
+            pool   = d.get("pool_size", "?")
+            served = d.get("tokens_served", "?")
+            rate   = d.get("rate_per_min", "?")
+            uptime = int(d.get("uptime_minutes") or 0)
+            return pool, served, rate, uptime
+        except requests.exceptions.ConnectTimeout:
+            if attempt == 0:
+                continue
+            return "OFFLINE", "OFFLINE", "OFFLINE", 0
+        except requests.exceptions.ConnectionError:
+            if attempt == 0:
+                continue
+            return "UNREACHABLE", "UNREACHABLE", "UNREACHABLE", 0
+        except Exception:
+            if attempt == 0:
+                continue
+            return "N/A", "N/A", "N/A", 0
+    return "N/A", "N/A", "N/A", 0
 
 def fetch_cn31_stock():
-    try:
-        r = requests.get(CN31_API, timeout=6)
-        d = r.json()
-        pool      = d.get("pool_size", "?")
-        served    = d.get("tokens_served", "?")
-        workers   = d.get("active_workers", "?")
-        generated = d.get("tokens_generated", "?")
-        return pool, served, workers, generated
-    except requests.exceptions.ConnectTimeout:
-        return "OFFLINE", "OFFLINE", "OFFLINE", "OFFLINE"
-    except requests.exceptions.ConnectionError:
-        return "UNREACHABLE", "UNREACHABLE", "UNREACHABLE", "UNREACHABLE"
-    except Exception:
-        return "N/A", "N/A", "N/A", "N/A"
+    for attempt in range(2):
+        try:
+            r = requests.get(CN31_API, timeout=15)
+            d = r.json()
+            pool      = d.get("pool_size", "?")
+            served    = d.get("tokens_served", "?")
+            workers   = d.get("active_workers", "?")
+            generated = d.get("tokens_generated", "?")
+            return pool, served, workers, generated
+        except requests.exceptions.ConnectTimeout:
+            if attempt == 0:
+                continue
+            return "OFFLINE", "OFFLINE", "OFFLINE", "OFFLINE"
+        except requests.exceptions.ConnectionError:
+            if attempt == 0:
+                continue
+            return "UNREACHABLE", "UNREACHABLE", "UNREACHABLE", "UNREACHABLE"
+        except Exception:
+            if attempt == 0:
+                continue
+            return "N/A", "N/A", "N/A", "N/A"
+    return "N/A", "N/A", "N/A", "N/A"
 
 def build_akamai_msg():
     ak_pool, ak_served, ak_rate, ak_uptime = fetch_akamai_stock()
