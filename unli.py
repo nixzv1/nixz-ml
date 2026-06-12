@@ -1205,6 +1205,7 @@ def build_final_summary(st_obj, stopped=False):
     s = int(elapsed % 60)
     elapsed_str = f"{h}h {m}m {s}s" if h else (f"{m}m {s}s" if m else f"{s}s")
     rate = ch / elapsed if elapsed > 0 else 0
+    cpm  = rate * 60
 
     def bar(count, total):
         if total == 0:
@@ -1231,6 +1232,7 @@ def build_final_summary(st_obj, stopped=False):
     msg += f"{sep2}\n"
     msg += f"<b>Time</b>    {elapsed_str}\n"
     msg += f"<b>Rate</b>    {rate:.2f} acc/s\n"
+    msg += f"<b>CPM</b>     {cpm:.1f}/min\n"
 
     top_accounts = st_obj.get("top_accounts", [])
     if top_accounts:
@@ -1239,24 +1241,14 @@ def build_final_summary(st_obj, stopped=False):
             msg += f"  {i}. {acc['ign']} — Lv.{acc['level']} | {acc['rank']} | {acc['country']}\n"
 
     collector_stats = st_obj.get("collector_stats", {})
-    collector_order = ["World","Mega","Exalted","Renowned","Collector","Epic","Special","Elite","Rare","Normal"]
-    col_lines = ""
-    for sk in collector_order:
-        cnt = collector_stats.get(sk, 0)
-        if cnt > 0:
-            col_lines += f"  {sk}: {cnt}\n"
-    if col_lines:
-        msg += f"\n{sep2}\n<b>COLLECTOR TIER</b>\n{col_lines}"
-
-    rank_counts = st_obj.get("rank_counts", {})
-    rank_order  = ["Mythic","Legend","Epic","Grandmaster","Master","Elite","Warrior"]
-    rank_lines  = ""
-    for rk in rank_order:
-        cnt = rank_counts.get(rk, 0)
-        if cnt > 0:
-            rank_lines += f"  {rk}: {cnt}\n"
-    if rank_lines:
-        msg += f"\n{sep2}\n<b>RANK BREAKDOWN</b>\n{rank_lines}"
+    if collector_stats:
+        sorted_tiers = sorted(collector_stats.items(), key=lambda x: _collector_tier_sort_key(x[0]))
+        col_lines = ""
+        for ct, cnt in sorted_tiers:
+            if cnt > 0:
+                col_lines += f"  {ct}: {cnt}\n"
+        if col_lines:
+            msg += f"\n{sep2}\n<b>COLLECTOR TIER</b>\n{col_lines}"
 
     msg += f"\n{sep}\n<b>Powered by @nixzlls</b>"
     return msg
@@ -1374,9 +1366,9 @@ def fetch_stock_summary():
     ak_ok   = False
     cn_ok   = False
     try:
-        r = requests.get(AKAMAI_API, timeout=8)
+        r = requests.get(AKAMAI_API, timeout=15)
         d = r.json()
-        ak_pool = d.get("pool_size") or d.get("pool") or d.get("count") or d.get("total") or d.get("size") or "N/A"
+        ak_pool = d.get("pool_size", "N/A")
         try:
             ak_ok = int(ak_pool) > 0
         except Exception:
@@ -1384,9 +1376,9 @@ def fetch_stock_summary():
     except Exception:
         pass
     try:
-        r2 = requests.get(CN31_API, timeout=8)
+        r2 = requests.get(CN31_API, timeout=15)
         d2 = r2.json()
-        cn_pool = d2.get("pool_size") or d2.get("pool") or d2.get("count") or d2.get("total") or d2.get("size") or "N/A"
+        cn_pool = d2.get("pool_size", "N/A")
         try:
             cn_ok = int(cn_pool) > 0
         except Exception:
