@@ -65,15 +65,16 @@ PRICING_TEXT = (
     "  <b>PREMIUM PRICING</b>\n"
     "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
     "  1 Day    — <b>₱50</b>  (~$1)\n"
-    "  3 Days   — <b>₱100</b>  (~$2)\n"
-    "  1 Week  — <b>₱150</b>  (~$3)\n\n"
+    "  3 Days   — <b>₱130</b>  (~$2.30)\n"
+    "  1 Week   — <b>₱250</b>  (~$4.40)\n"
+    "  1 Month  — <b>₱800</b>  (~$14)\n\n"
     "━━━━━━━━━━━━━━━━━━━━━━━━\n"
     "  <b>PREMIUM ADVANTAGES</b>\n"
     "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
     "  Unlimited checking (no daily cap)\n"
     "  No waiting in line\n"
     "  Higher priority over free users\n"
-    "  5 threads (faster checking)\n"
+    "  8 threads (faster checking)\n"
     "  Access to all premium features\n\n"
     "━━━━━━━━━━━━━━━━━━━━━━━━\n"
     "  <b>HOW TO PAY</b>\n"
@@ -2390,6 +2391,38 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sep = "━━━━━━━━━━━━━━━━━━━━━━━━"
 
     if data == "back_main":
+        bot_st = get_bot_status()
+        if bot_st != "on" and uid != ADMIN_ID:
+            prem_chk = is_premium(user)
+            if bot_st == "off_all" or (bot_st == "off_free" and not prem_chk):
+                if bot_st == "off_free" and not prem_chk:
+                    maint_msg = (
+                        "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        "  <b>FREE CHECKING PAUSED</b>\n"
+                        "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                        "All free checking is temporarily stopped.\n\n"
+                        "If you want to continue checking, avail\n"
+                        "premium access to <b>@nixzlls</b>\n\n"
+                        "Click <b>Pricing</b> to see the price."
+                    )
+                else:
+                    maint_msg = (
+                        "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        "  <b>BOT MAINTENANCE</b>\n"
+                        "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                        "The bot is currently under maintenance.\n"
+                        "Admin is fixing some issues.\n\n"
+                        "Please try again later."
+                    )
+                await query.edit_message_text(
+                    maint_msg,
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("[ PRICING ]", callback_data="pricing")],
+                        [InlineKeyboardButton("[ CHANNEL ]", url=f"https://t.me/{CHANNEL}")],
+                    ])
+                )
+                return ConversationHandler.END
         prem       = is_premium(user)
         access_tag = " PREMIUM" if prem else " FREE"
         text = (
