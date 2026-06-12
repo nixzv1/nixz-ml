@@ -34,18 +34,18 @@ ADMIN_ID = 5674812663
 CHANNEL  = "nixzllss"
 
 API_URL      = "http://144.91.112.169:4040/check"
-AKAMAI_API   = "http://80.241.218.98:5050/api/status"
-CN31_API     = "http://144.91.112.169:7070/stats"
+AKAMAI_API   = "http://5.189.140.181:3030/api/status"
+CN31_API     = "http://5.189.140.181:8080/stats"
 
-CN31_SERVER        = "http://144.91.112.169:7070/get-token"
-ABCK_SERVER        = "http://80.241.218.98:5050"
+CN31_SERVER        = "http://5.189.140.181:8080/get-token"
+ABCK_SERVER        = "http://5.189.140.181:3030"
 ABCK_ENDPOINT      = "/api/get-token"
 ABCK_SAVE_ENDPOINT = "/api/save-token"
 ABCK_CHECKS_PER_TOKEN = 50
 
 MLBB_URL = "https://accountmtapi.mobilelegends.com"
-BAN_AKAMAI_API = "http://80.241.218.98:5050/api/get-token"
-BAN_CN31_API   = "http://144.91.112.169:7070/get-token"
+BAN_AKAMAI_API = "http://5.189.140.181:3030/api/get-token"
+BAN_CN31_API   = "http://5.189.140.181:8080/get-token"
 API_STATS  = "https://app.web.moontontech.com/actgateway/battlereport/stats"
 API_HEROES = "https://app.web.moontontech.com/actgateway/battlereport/heros/frequent"
 
@@ -1326,7 +1326,7 @@ def fetch_stock_summary():
     try:
         r = requests.get(AKAMAI_API, timeout=8)
         d = r.json()
-        ak_pool = d.get("pool_size", "N/A")
+        ak_pool = d.get("pool_size") or d.get("pool") or d.get("count") or d.get("total") or d.get("size") or "N/A"
         try:
             ak_ok = int(ak_pool) > 0
         except Exception:
@@ -1336,7 +1336,7 @@ def fetch_stock_summary():
     try:
         r2 = requests.get(CN31_API, timeout=8)
         d2 = r2.json()
-        cn_pool = d2.get("pool_size", "N/A")
+        cn_pool = d2.get("pool_size") or d2.get("pool") or d2.get("count") or d2.get("total") or d2.get("size") or "N/A"
         try:
             cn_ok = int(cn_pool) > 0
         except Exception:
@@ -1350,10 +1350,10 @@ def fetch_akamai_stock():
     try:
         r = requests.get(AKAMAI_API, timeout=10)
         d = r.json()
-        pool   = d.get("pool_size", "?")
-        served = d.get("tokens_served", "?")
-        rate   = d.get("rate_per_min", "?")
-        uptime = int(d.get("uptime_minutes", 0))
+        pool   = d.get("pool_size") or d.get("pool") or d.get("count") or d.get("total") or d.get("size") or "?"
+        served = d.get("tokens_served") or d.get("served") or d.get("used") or d.get("total_served") or "?"
+        rate   = d.get("rate_per_min") or d.get("rate") or d.get("speed") or "?"
+        uptime = int(d.get("uptime_minutes") or d.get("uptime") or 0)
         return pool, served, rate, uptime
     except Exception:
         return "N/A", "N/A", "N/A", 0
@@ -1362,10 +1362,10 @@ def fetch_cn31_stock():
     try:
         r = requests.get(CN31_API, timeout=10)
         d = r.json()
-        pool      = d.get("pool_size", "?")
-        served    = d.get("tokens_served", "?")
-        workers   = d.get("active_workers", "?")
-        generated = d.get("tokens_generated", "?")
+        pool      = d.get("pool_size") or d.get("pool") or d.get("count") or d.get("total") or d.get("size") or "?"
+        served    = d.get("tokens_served") or d.get("served") or d.get("used") or d.get("total_served") or "?"
+        workers   = d.get("active_workers") or d.get("workers") or d.get("solver_count") or "?"
+        generated = d.get("tokens_generated") or d.get("generated") or d.get("total_generated") or "?"
         return pool, served, workers, generated
     except Exception:
         return "N/A", "N/A", "N/A", "N/A"
@@ -3629,6 +3629,9 @@ async def receive_check_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await status_msg.edit_text(" No valid combos found.")
         return ConversationHandler.END
 
+    if len(combos) > MAX_COMBO_LINES:
+        combos    = combos[:MAX_COMBO_LINES]
+
     total_raw = len(combos)
 
     if not prem:
@@ -3675,7 +3678,7 @@ async def receive_check_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"  <b>FILE LOADED</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"Combos loaded: <b>{total_raw:,}</b>\n"
+        f"Combos loaded: <b>{total_raw:,}</b>  (max {MAX_COMBO_LINES:,}/batch)\n"
         f"Accounts in database: <b>{db_count:,}</b>\n\n"
         f"Do you want to scan your combo against the database first?\n\n"
         f"If yes, accounts already in the database will be removed from your list and sent back to you separately, then the remaining ones will be checked.",
