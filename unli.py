@@ -26,6 +26,7 @@ from telegram.ext import (
     filters,
     ConversationHandler,
 )
+from telegram.error import RetryAfter
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -124,10 +125,39 @@ free_queue_active  = set()
 
 print_lock = threading.Lock()
 
+def _safe_threadsafe(coro, loop, retries=5):
+    for attempt in range(retries):
+        try:
+            fut = _safe_threadsafe(coro, loop)
+            return fut.result(timeout=30)
+        except RetryAfter as e:
+            time.sleep(e.retry_after + 1)
+        except Exception:
+            return None
+    return None
+
+async def _safe_send(coro, retries=5):
+    for attempt in range(retries):
+        try:
+            return await coro
+        except RetryAfter as e:
+            await asyncio.sleep(e.retry_after + 1)
+        except Exception:
+            return None
+    return None
+
 _abck_fetch_lock = threading.Lock()
 _abck_fetching   = threading.Event()
 _consecutive_rl_count = 0
 _consecutive_rl_lock  = threading.Lock()
+_flood_until          = 0
+_flood_lock           = threading.Lock()
+
+def _check_flood_wait():
+    with _flood_lock:
+        wait = _flood_until - time.time()
+    if wait > 0:
+        time.sleep(wait)
 
 _cn31_spinner_chars = ['|', '/', '-', '\\']
 _cn31_spinner_idx   = 0
@@ -1547,6 +1577,7 @@ def check_single_thread(login, password, uid, chat_id, context, st_obj, app_loop
             else:
                 st_obj.setdefault("v2l_off_lines", []).append(plain_text)
                 st_obj.setdefault("valid_lines",   []).append(plain_text)
+        time.sleep(0.05)
 
     elif status == "invalid":
         with lock:
@@ -1570,7 +1601,7 @@ def _update_live_stats(chat_id, context, st_obj, app_loop):
         return
     try:
         kb = None if done else InlineKeyboardMarkup([[InlineKeyboardButton("⏹ STOP", callback_data="stop_check")]])
-        asyncio.run_coroutine_threadsafe(
+        _safe_threadsafe(
             context.bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=msg_id,
@@ -1597,7 +1628,7 @@ def _start_stats_updater(chat_id, context, st_obj, app_loop, uid):
             done    = checked >= total
             try:
                 kb = None if done else InlineKeyboardMarkup([[InlineKeyboardButton("⏹ STOP", callback_data="stop_check")]])
-                fut = asyncio.run_coroutine_threadsafe(
+                fut = _safe_threadsafe(
                     context.bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=msg_id,
@@ -1640,7 +1671,7 @@ def run_check_job(uid, chat_id, combos, context, st_obj, app_loop, num_threads, 
     if hit_mode in ("send_hits_onebyone", "send_hits_both"):
         for vl in valid_lines:
             try:
-                asyncio.run_coroutine_threadsafe(
+                _safe_threadsafe(
                     context.bot.send_message(
                         chat_id=chat_id,
                         text=f"<b>HIT — NOT BANNED</b>\n\n{vl}",
@@ -1652,7 +1683,7 @@ def run_check_job(uid, chat_id, combos, context, st_obj, app_loop, num_threads, 
                 pass
         for bl in ban_lines:
             try:
-                asyncio.run_coroutine_threadsafe(
+                _safe_threadsafe(
                     context.bot.send_message(
                         chat_id=chat_id,
                         text=f"<b>HIT — BANNED</b>\n\n{bl}",
@@ -1668,7 +1699,7 @@ def run_check_job(uid, chat_id, combos, context, st_obj, app_loop, num_threads, 
             vb   = "\n\n".join(valid_lines).encode("utf-8")
             vbuf = io.BytesIO(vb)
             vbuf.name = "valid_not_ban.txt"
-            asyncio.run_coroutine_threadsafe(
+            _safe_threadsafe(
                 context.bot.send_document(
                     chat_id=chat_id,
                     document=vbuf,
@@ -1682,7 +1713,7 @@ def run_check_job(uid, chat_id, combos, context, st_obj, app_loop, num_threads, 
             bb   = "\n\n".join(ban_lines).encode("utf-8")
             bbuf = io.BytesIO(bb)
             bbuf.name = "valid_banned.txt"
-            asyncio.run_coroutine_threadsafe(
+            _safe_threadsafe(
                 context.bot.send_document(
                     chat_id=chat_id,
                     document=bbuf,
@@ -1699,7 +1730,7 @@ def run_check_job(uid, chat_id, combos, context, st_obj, app_loop, num_threads, 
             vob   = "\n\n".join(v2l_on_lines).encode("utf-8")
             vobuf = io.BytesIO(vob)
             vobuf.name = "v2l_on.txt"
-            asyncio.run_coroutine_threadsafe(
+            _safe_threadsafe(
                 context.bot.send_document(
                     chat_id=chat_id,
                     document=vobuf,
@@ -1713,7 +1744,7 @@ def run_check_job(uid, chat_id, combos, context, st_obj, app_loop, num_threads, 
             vfb   = "\n\n".join(v2l_off_lines).encode("utf-8")
             vfbuf = io.BytesIO(vfb)
             vfbuf.name = "v2l_off.txt"
-            asyncio.run_coroutine_threadsafe(
+            _safe_threadsafe(
                 context.bot.send_document(
                     chat_id=chat_id,
                     document=vfbuf,
@@ -1736,7 +1767,7 @@ def run_check_job(uid, chat_id, combos, context, st_obj, app_loop, num_threads, 
         db2["global_stats"]["total_invalid"] = db2["global_stats"].get("total_invalid", 0) + st_obj["invalid"]
         save_db(db2)
 
-    asyncio.run_coroutine_threadsafe(
+    _safe_threadsafe(
         context.bot.send_message(chat_id=chat_id, text=summary, parse_mode="HTML"),
         app_loop
     )
@@ -1763,7 +1794,7 @@ def process_next_free_queue(context, app_loop):
         deduct_checks(user2, num_lines)
         save_db(db2)
 
-    asyncio.run_coroutine_threadsafe(
+    _safe_threadsafe(
         context.bot.send_message(
             chat_id=chat_id,
             text=f" Your check has started! ({num_lines} accounts)",
@@ -3850,7 +3881,7 @@ async def receive_semi_email(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 done    = checked >= total
                 try:
                     kb = None if done else InlineKeyboardMarkup([[InlineKeyboardButton("⏹ STOP", callback_data="stop_check")]])
-                    fut = asyncio.run_coroutine_threadsafe(
+                    fut = _safe_threadsafe(
                         context.bot.edit_message_text(
                             chat_id=chat_id,
                             message_id=msg_id,
@@ -3902,7 +3933,7 @@ async def receive_semi_email(update: Update, context: ContextTypes.DEFAULT_TYPE)
             nb_bytes = "\n\n".join(not_ban_lines).encode("utf-8")
             nb_buf   = io.BytesIO(nb_bytes)
             nb_buf.name = "valid_not_ban.txt"
-            asyncio.run_coroutine_threadsafe(
+            _safe_threadsafe(
                 context.bot.send_document(
                     chat_id=chat_id,
                     document=nb_buf,
@@ -3916,7 +3947,7 @@ async def receive_semi_email(update: Update, context: ContextTypes.DEFAULT_TYPE)
             bi_bytes = "\n\n".join(ban_lines).encode("utf-8")
             bi_buf   = io.BytesIO(bi_bytes)
             bi_buf.name = "valid_banned.txt"
-            asyncio.run_coroutine_threadsafe(
+            _safe_threadsafe(
                 context.bot.send_document(
                     chat_id=chat_id,
                     document=bi_buf,
@@ -3950,7 +3981,7 @@ async def receive_semi_email(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"<b>TIME:</b>     {elapsed_str}\n\n"
             f"<b>Powered by @nixzlls</b>"
         )
-        asyncio.run_coroutine_threadsafe(
+        _safe_threadsafe(
             context.bot.send_message(
                 chat_id=chat_id,
                 text=summary,
