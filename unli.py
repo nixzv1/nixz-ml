@@ -1409,7 +1409,7 @@ def fetch_stock_summary():
 
 def fetch_akamai_stock():
     try:
-        r = requests.get(AKAMAI_API, timeout=6)
+        r = requests.get(AKAMAI_API, timeout=15)
         d = r.json()
         return {
             "pool":   d.get("pool_size", "?"),
@@ -1422,13 +1422,19 @@ def fetch_akamai_stock():
 
 def fetch_cn31_stock():
     try:
-        r = requests.get(CN31_API, timeout=6)
+        r = requests.get(CN31_API, timeout=15)
+        r.raise_for_status()
         d = r.json()
         return {
-            "pool":      d.get("pool_size", "?"),
-            "served":    d.get("tokens_served", "?"),
-            "workers":   d.get("active_workers", "?"),
-            "generated": d.get("tokens_generated", "?"),
+            "pool":       d.get("pool_size",           "?"),
+            "served":     d.get("tokens_served",       "?"),
+            "generated":  d.get("tokens_generated",    "?"),
+            "workers":    d.get("active_workers",      "?"),
+            "failures":   d.get("generation_failures", "?"),
+            "requests":   d.get("total_requests",      "?"),
+            "peak":       d.get("peak_queue",          "?"),
+            "expired":    d.get("tokens_expired",      "?"),
+            "last_served":d.get("last_served",         "?"),
         }
     except Exception:
         return None
@@ -1459,17 +1465,17 @@ def build_cn31_msg():
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     msg  = f"{sep}\n  <b>CN31 STOCK</b>\n{sep}\n\n"
     if cn is None:
-        msg += f"  <b>⚠ SERVER OFFLINE</b>\n"
+        msg += f"  <b>SERVER OFFLINE</b>\n"
         msg += f"  Checking may fail until server is back.\n"
-        msg += f"  Stock: N/A\n"
-        msg += f"  Served: N/A\n"
-        msg += f"  Generated: N/A\n"
-        msg += f"  Workers: N/A\n"
     else:
+        msg += f"Main Server\n"
         msg += f"  Stock: {cn['pool']}\n"
-        msg += f"  Served: {cn['served']}\n"
-        msg += f"  Generated: {cn['generated']}\n"
+        msg += f"  Served: {cn['served']} | Generated: {cn['generated']}\n"
         msg += f"  Workers: {cn['workers']}\n"
+        msg += f"  Requests: {cn['requests']}\n"
+        msg += f"  Failures: {cn['failures']}\n"
+        msg += f"  Peak Queue: {cn['peak']}\n"
+        msg += f"  Expired: {cn['expired']}\n"
     msg += f"  Last Checked: {now_str}\n"
     return msg
 
