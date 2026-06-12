@@ -64,18 +64,25 @@ PRICING_TEXT = (
     "━━━━━━━━━━━━━━━━━━━━━━━━\n"
     "  <b>PREMIUM PRICING</b>\n"
     "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    "  1 Day    — <b>₱50</b>\n"
-    "  3 Days   — <b>₱100</b>\n"
-    "  1 Week   — <b>₱150</b>\n\n"
+    "  1 Day    — <b>₱50</b>  (~$1)\n"
+    "  3 Days   — <b>₱130</b>  (~$2.30)\n"
+    "  1 Week   — <b>₱250</b>  (~$4.40)\n"
+    "  1 Month  — <b>₱800</b>  (~$14)\n\n"
     "━━━━━━━━━━━━━━━━━━━━━━━━\n"
-    "  <b>Premium Advantages</b>\n"
+    "  <b>PREMIUM ADVANTAGES</b>\n"
     "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
     "  Unlimited checking (no daily cap)\n"
     "  No waiting in line\n"
     "  Higher priority over free users\n"
     "  8 threads (faster checking)\n"
     "  Access to all premium features\n\n"
-    "To purchase, contact: @nixzlls"
+    "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "  <b>HOW TO PAY</b>\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    "  Accepted: GCash / Binance\n\n"
+    "  Message <b>@nixzlls</b> to get\n"
+    "  payment details privately.\n\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━"
 )
 
 INFO_TEXT = (
@@ -118,6 +125,18 @@ lock          = threading.Lock()
 cancel_flag   = {}
 stats_store   = {}
 chat_id_store = {}
+
+BOT_STATUS        = "on"
+BOT_STATUS_LOCK   = threading.Lock()
+
+def get_bot_status():
+    with BOT_STATUS_LOCK:
+        return BOT_STATUS
+
+def set_bot_status(status):
+    global BOT_STATUS
+    with BOT_STATUS_LOCK:
+        BOT_STATUS = status
 
 free_check_queue   = queue.Queue()
 free_queue_lock    = threading.Lock()
@@ -1389,77 +1408,68 @@ def fetch_stock_summary():
 
 
 def fetch_akamai_stock():
-    for attempt in range(2):
-        try:
-            r = requests.get(AKAMAI_API, timeout=15)
-            d = r.json()
-            pool   = d.get("pool_size", "?")
-            served = d.get("tokens_served", "?")
-            rate   = d.get("rate_per_min", "?")
-            uptime = int(d.get("uptime_minutes") or 0)
-            return pool, served, rate, uptime
-        except requests.exceptions.ConnectTimeout:
-            if attempt == 0:
-                continue
-            return "OFFLINE", "OFFLINE", "OFFLINE", 0
-        except requests.exceptions.ConnectionError:
-            if attempt == 0:
-                continue
-            return "UNREACHABLE", "UNREACHABLE", "UNREACHABLE", 0
-        except Exception:
-            if attempt == 0:
-                continue
-            return "N/A", "N/A", "N/A", 0
-    return "N/A", "N/A", "N/A", 0
+    try:
+        r = requests.get(AKAMAI_API, timeout=6)
+        d = r.json()
+        return {
+            "pool":   d.get("pool_size", "?"),
+            "served": d.get("tokens_served", "?"),
+            "rate":   d.get("rate_per_min", "?"),
+            "uptime": int(d.get("uptime_minutes") or 0),
+        }
+    except Exception:
+        return None
 
 def fetch_cn31_stock():
-    for attempt in range(2):
-        try:
-            r = requests.get(CN31_API, timeout=15)
-            d = r.json()
-            pool      = d.get("pool_size", "?")
-            served    = d.get("tokens_served", "?")
-            workers   = d.get("active_workers", "?")
-            generated = d.get("tokens_generated", "?")
-            return pool, served, workers, generated
-        except requests.exceptions.ConnectTimeout:
-            if attempt == 0:
-                continue
-            return "OFFLINE", "OFFLINE", "OFFLINE", "OFFLINE"
-        except requests.exceptions.ConnectionError:
-            if attempt == 0:
-                continue
-            return "UNREACHABLE", "UNREACHABLE", "UNREACHABLE", "UNREACHABLE"
-        except Exception:
-            if attempt == 0:
-                continue
-            return "N/A", "N/A", "N/A", "N/A"
-    return "N/A", "N/A", "N/A", "N/A"
+    try:
+        r = requests.get(CN31_API, timeout=6)
+        d = r.json()
+        return {
+            "pool":      d.get("pool_size", "?"),
+            "served":    d.get("tokens_served", "?"),
+            "workers":   d.get("active_workers", "?"),
+            "generated": d.get("tokens_generated", "?"),
+        }
+    except Exception:
+        return None
 
 def build_akamai_msg():
-    ak_pool, ak_served, ak_rate, ak_uptime = fetch_akamai_stock()
+    ak      = fetch_akamai_stock()
     sep     = "────────────────────────"
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     msg  = f"{sep}\n  <b>AKAMAI STOCK</b>\n{sep}\n\n"
-    msg += f"  Stock: {ak_pool}\n"
-    msg += f"  Served: {ak_served}\n"
-    msg += f"  Rate: {ak_rate}/min\n"
-    msg += f"  Uptime: {ak_uptime} min\n"
-    msg += f"  Last Served: {now_str}\n"
+    if ak is None:
+        msg += f"  <b>⚠ SERVER OFFLINE</b>\n"
+        msg += f"  Checking may fail until server is back.\n"
+        msg += f"  Stock: N/A\n"
+        msg += f"  Served: N/A\n"
+        msg += f"  Rate: N/A\n"
+        msg += f"  Uptime: N/A\n"
+    else:
+        msg += f"  Stock: {ak['pool']}\n"
+        msg += f"  Served: {ak['served']}\n"
+        msg += f"  Rate: {ak['rate']}/min\n"
+        msg += f"  Uptime: {ak['uptime']} min\n"
+    msg += f"  Last Checked: {now_str}\n"
     return msg
 
 def build_cn31_msg():
-    cn_pool, cn_served, cn_workers, cn_gen = fetch_cn31_stock()
+    cn      = fetch_cn31_stock()
     sep     = "────────────────────────"
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    offline = str(cn_pool) in ("OFFLINE", "UNREACHABLE", "ERROR")
-    status  = f"  <b>⚠ SERVER {cn_pool}</b>\n  Checking may fail until server is back.\n" if offline else ""
     msg  = f"{sep}\n  <b>CN31 STOCK</b>\n{sep}\n\n"
-    msg += status
-    msg += f"  Stock: {cn_pool}\n"
-    msg += f"  Served: {cn_served}\n"
-    msg += f"  Generated: {cn_gen}\n"
-    msg += f"  Workers: {cn_workers}\n"
+    if cn is None:
+        msg += f"  <b>⚠ SERVER OFFLINE</b>\n"
+        msg += f"  Checking may fail until server is back.\n"
+        msg += f"  Stock: N/A\n"
+        msg += f"  Served: N/A\n"
+        msg += f"  Generated: N/A\n"
+        msg += f"  Workers: N/A\n"
+    else:
+        msg += f"  Stock: {cn['pool']}\n"
+        msg += f"  Served: {cn['served']}\n"
+        msg += f"  Generated: {cn['generated']}\n"
+        msg += f"  Workers: {cn['workers']}\n"
     msg += f"  Last Checked: {now_str}\n"
     return msg
 
@@ -1507,37 +1517,45 @@ def main_menu_keyboard(uid=None, db=None):
     return InlineKeyboardMarkup(keyboard)
 
 def admin_menu_keyboard():
+    st      = get_bot_status()
+    stop_label_all  = "[ RESUME BOT ]"        if st == "off_all"  else "[ STOP ALL ]"
+    stop_label_free = "[ RESUME FREE ]"       if st == "off_free" else "[ STOP FREE ONLY ]"
     keyboard = [
         [
-            InlineKeyboardButton("All Users", callback_data="admin_users_page_0"),
-            InlineKeyboardButton("Premium Users", callback_data="admin_premium"),
+            InlineKeyboardButton(stop_label_all,  callback_data="admin_toggle_stop_all"),
+            InlineKeyboardButton(stop_label_free, callback_data="admin_toggle_stop_free"),
+        ],
+        [InlineKeyboardButton("Active Sessions", callback_data="admin_active_sessions")],
+        [
+            InlineKeyboardButton("All Users",      callback_data="admin_users_page_0"),
+            InlineKeyboardButton("Premium Users",  callback_data="admin_premium"),
         ],
         [
-            InlineKeyboardButton("Free Users", callback_data="admin_free"),
-            InlineKeyboardButton("Global Stats", callback_data="admin_globalstats"),
+            InlineKeyboardButton("Free Users",    callback_data="admin_free"),
+            InlineKeyboardButton("Global Stats",  callback_data="admin_globalstats"),
         ],
         [
-            InlineKeyboardButton("Generate Key", callback_data="admin_genkey"),
-            InlineKeyboardButton("List Keys", callback_data="admin_listkeys"),
+            InlineKeyboardButton("Generate Key",  callback_data="admin_genkey"),
+            InlineKeyboardButton("List Keys",     callback_data="admin_listkeys"),
         ],
         [
-            InlineKeyboardButton("Add Premium", callback_data="admin_addpremium"),
-            InlineKeyboardButton("Revoke Premium", callback_data="admin_revokepremium"),
+            InlineKeyboardButton("Add Premium",   callback_data="admin_addpremium"),
+            InlineKeyboardButton("Revoke Premium",callback_data="admin_revokepremium"),
         ],
         [
-            InlineKeyboardButton("Add Free Checks", callback_data="admin_addchecks"),
-            InlineKeyboardButton("View Feedback", callback_data="admin_feedback"),
+            InlineKeyboardButton("Add Free Checks",callback_data="admin_addchecks"),
+            InlineKeyboardButton("View Feedback",  callback_data="admin_feedback"),
         ],
         [
             InlineKeyboardButton("Send Announcement", callback_data="admin_announce"),
-            InlineKeyboardButton("Create Vote", callback_data="admin_vote"),
+            InlineKeyboardButton("Create Vote",       callback_data="admin_vote"),
         ],
         [
-            InlineKeyboardButton("View Votes", callback_data="admin_viewvotes"),
-            InlineKeyboardButton("Broadcast", callback_data="admin_broadcast"),
+            InlineKeyboardButton("View Votes",  callback_data="admin_viewvotes"),
+            InlineKeyboardButton("Broadcast",   callback_data="admin_broadcast"),
         ],
         [
-            InlineKeyboardButton("Add Combo DB", callback_data="admin_add_combo_db"),
+            InlineKeyboardButton("Add Combo DB",  callback_data="admin_add_combo_db"),
             InlineKeyboardButton("View Combo DB", callback_data="admin_view_combo_db"),
         ],
         [InlineKeyboardButton("Back", callback_data="back_main")],
@@ -1906,6 +1924,39 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_member(context.bot, uid):
         await send_join_prompt(update.message, context)
         return ConversationHandler.END
+
+    bot_st = get_bot_status()
+    if bot_st != "on" and uid != ADMIN_ID:
+        with data_lock:
+            db   = get_db()
+            user = get_user(db, uid)
+        prem = is_premium(user)
+        if bot_st == "off_all" or (bot_st == "off_free" and not prem):
+            if bot_st == "off_free" and not prem:
+                msg = (
+                    "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    "  <b>FREE CHECKING PAUSED</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                    "All free checking is temporarily stopped.\n\n"
+                    "If you want to continue checking, avail\n"
+                    "premium access to <b>@nixzlls</b>\n\n"
+                    "Click <b>Pricing</b> in the menu to see the price."
+                )
+            else:
+                msg = (
+                    "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    "  <b>BOT MAINTENANCE</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                    "The bot is currently under maintenance.\n"
+                    "Admin is fixing some issues.\n\n"
+                    "Please try again later."
+                )
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("[ PRICING ]", callback_data="pricing")],
+                [InlineKeyboardButton("[ CHANNEL ]", url=f"https://t.me/{CHANNEL}")],
+            ])
+            await update.message.reply_text(msg, parse_mode="HTML", reply_markup=kb)
+            return ConversationHandler.END
 
     with data_lock:
         db   = get_db()
@@ -2926,6 +2977,92 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
         return ConversationHandler.END
 
+    if data == "admin_toggle_stop_all":
+        if uid != ADMIN_ID:
+            return ConversationHandler.END
+        cur = get_bot_status()
+        if cur == "off_all":
+            set_bot_status("on")
+            label = "Bot RESUMED for all users."
+        else:
+            set_bot_status("off_all")
+            label = "Bot STOPPED for ALL users (maintenance mode)."
+        await query.edit_message_text(
+            f"<b>BOT STATUS</b>\n{sep}\n\n{label}",
+            parse_mode="HTML",
+            reply_markup=admin_menu_keyboard()
+        )
+        return ConversationHandler.END
+
+    if data == "admin_toggle_stop_free":
+        if uid != ADMIN_ID:
+            return ConversationHandler.END
+        cur = get_bot_status()
+        if cur == "off_free":
+            set_bot_status("on")
+            label = "Free checking RESUMED."
+        elif cur == "on":
+            set_bot_status("off_free")
+            label = "Free checking STOPPED. Premium users can still check."
+        else:
+            label = f"Cannot toggle — current status is '{cur}'. Resume all first."
+        await query.edit_message_text(
+            f"<b>BOT STATUS</b>\n{sep}\n\n{label}",
+            parse_mode="HTML",
+            reply_markup=admin_menu_keyboard()
+        )
+        return ConversationHandler.END
+
+    if data == "admin_active_sessions":
+        if uid != ADMIN_ID:
+            return ConversationHandler.END
+        sep2    = "────────────────────────"
+        now     = time.time()
+        with lock:
+            active_uids = [u for u, st_obj in stats_store.items()
+                           if st_obj and st_obj.get("checked", 0) < st_obj.get("total", 0)]
+        if not active_uids:
+            await query.edit_message_text(
+                f"<b>ACTIVE SESSIONS</b>\n{sep}\n\nNo active checking sessions right now.",
+                parse_mode="HTML",
+                reply_markup=back_admin_keyboard()
+            )
+            return ConversationHandler.END
+        with data_lock:
+            db2 = get_db()
+        lines = [f"<b>ACTIVE SESSIONS ({len(active_uids)})</b>", sep]
+        for auid in active_uids:
+            st_obj   = stats_store.get(auid, {})
+            udata    = db2["users"].get(str(auid), {})
+            uname2   = udata.get("username") or udata.get("first_name") or f"User{auid}"
+            prem2    = is_premium(udata)
+            tier     = "PREMIUM" if prem2 else "FREE"
+            checked  = st_obj.get("checked", 0)
+            total2   = st_obj.get("total", 0)
+            valid2   = st_obj.get("valid", 0)
+            invalid2 = st_obj.get("invalid", 0)
+            errors2  = st_obj.get("errors", 0)
+            elapsed  = now - st_obj.get("start_time", now)
+            mins     = int(elapsed // 60)
+            secs     = int(elapsed % 60)
+            pct      = int(checked / total2 * 100) if total2 else 0
+            bar      = "█" * (pct // 10) + "░" * (10 - pct // 10)
+            lines.append(f"\n<b>@{uname2}</b>  [{tier}]  <code>{auid}</code>")
+            lines.append(f"  [{bar}] {pct}%")
+            lines.append(f"  Checked: <b>{checked}/{total2}</b>")
+            lines.append(f"  Valid: <b>{valid2}</b>  Invalid: <b>{invalid2}</b>  Err: <b>{errors2}</b>")
+            lines.append(f"  Elapsed: {mins}m {secs}s")
+            lines.append(sep2)
+        await query.edit_message_text(
+            "\n".join(lines),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Refresh", callback_data="admin_active_sessions")],
+                [InlineKeyboardButton("Back to Admin", callback_data="admin_panel")],
+            ])
+        )
+        return ConversationHandler.END
+
     if data == "admin_panel":
         if uid != ADMIN_ID:
             await query.edit_message_text(" Access denied.", reply_markup=back_keyboard())
@@ -3676,6 +3813,33 @@ async def receive_check_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reset_daily_if_needed(user)
         prem = is_premium(user)
         save_db(db)
+
+    bot_st = get_bot_status()
+    if bot_st != "on" and uid != ADMIN_ID:
+        if bot_st == "off_all" or (bot_st == "off_free" and not prem):
+            if bot_st == "off_free" and not prem:
+                block_msg = (
+                    "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    "  <b>FREE CHECKING PAUSED</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                    "All free checking is temporarily stopped.\n\n"
+                    "Avail premium to continue — @nixzlls"
+                )
+            else:
+                block_msg = (
+                    "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    "  <b>BOT MAINTENANCE</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                    "Bot is currently under maintenance.\n"
+                    "Please try again later."
+                )
+            await update.message.reply_text(
+                block_msg, parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("[ PRICING ]", callback_data="pricing")]
+                ])
+            )
+            return ConversationHandler.END
 
     status_msg = await update.message.reply_text("Downloading file...")
 
