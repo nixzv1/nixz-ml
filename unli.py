@@ -34,8 +34,8 @@ ADMIN_ID = 5674812663
 CHANNEL  = "nixzllss"
 
 API_URL      = "http://144.91.112.169:4040/check"
-AKAMAI_API   = "http://5.189.140.181:3030/api/status"
-CN31_API     = "http://5.189.140.181:8080/stats"
+AKAMAI_API   = "http://80.241.218.98:5050/api/status"
+CN31_API     = "http://144.91.112.169:7070/stats"
 
 CN31_SERVER        = "http://144.91.112.169:7070/get-token"
 ABCK_SERVER        = "http://80.241.218.98:5050"
@@ -1344,6 +1344,9 @@ def fetch_stock_summary():
     except Exception:
         pass
     return ak_pool, cn_pool, ak_ok, cn_ok
+
+
+def fetch_akamai_stock():
     try:
         r = requests.get(AKAMAI_API, timeout=10)
         d = r.json()
@@ -3426,7 +3429,53 @@ async def receive_check_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return AWAITING_CHECK_FILE
 
     file = await context.bot.get_file(doc.file_id)
-    buf  = await file.download_as_bytearray()
+
+    def _dlbar(n, w=10):
+        return "█" * n + "░" * (w - n)
+
+    dl_msg = await update.message.reply_text(
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"  <b>DOWNLOADING</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"  [{_dlbar(0)}]  0%\n"
+        f"  {doc.file_name}",
+        parse_mode="HTML"
+    )
+
+    dl_task = asyncio.create_task(file.download_as_bytearray())
+
+    for _i in range(1, 10):
+        await asyncio.sleep(0.12)
+        if dl_task.done():
+            break
+        try:
+            await dl_msg.edit_text(
+                f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"  <b>DOWNLOADING</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"  [{_dlbar(_i)}]  {_i * 10}%\n"
+                f"  {doc.file_name}",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+
+    buf = await dl_task
+
+    try:
+        await dl_msg.edit_text(
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"  <b>DOWNLOADING</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"  [{_dlbar(10)}]  100%\n"
+            f"  {doc.file_name}",
+            parse_mode="HTML"
+        )
+        await asyncio.sleep(0.4)
+        await dl_msg.delete()
+    except Exception:
+        pass
+
     raw_text = buf.decode("utf-8", errors="ignore")
 
     if context.user_data.get("awaiting_admin_combo_db") and uid == ADMIN_ID:
@@ -3455,8 +3504,26 @@ async def receive_check_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     if context.user_data.get("awaiting_combo_fixer_clean"):
         context.user_data["awaiting_combo_fixer_clean"] = False
-        from url import process_line, is_valid_credential
         import re as _re
+        def _process_line(line):
+            line = line.strip()
+            if not line:
+                return None
+            line = _re.sub(r'https?://\S+', '', line, flags=_re.IGNORECASE).strip()
+            line = _re.sub(r'www\.\S+', '', line, flags=_re.IGNORECASE).strip()
+            line = _re.sub(r'android://\S+', '', line, flags=_re.IGNORECASE).strip()
+            line = _re.sub(r'@INFECTLOGS\S*', '', line, flags=_re.IGNORECASE).strip()
+            if '|' in line and ':' not in line:
+                line = line.replace('|', ':', 1)
+            if ':' not in line:
+                return None
+            parts = line.split(':', 1)
+            u, p = parts[0].strip(), parts[1].strip()
+            if not u or not p or len(u) < 3 or len(p) < 3:
+                return None
+            if any(bad in u.lower() for bad in ['http', 'www.', '.com', '.net', '.org', 'garena', 'facebook']):
+                return None
+            return f"{u}:{p}"
         lines = raw_text.splitlines()
         total = len([l for l in lines if l.strip()])
         credentials = []
@@ -3471,7 +3538,7 @@ async def receive_check_file(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 r'https?://|www\.|android://|\.com|\.net|\.org|\.io|\.co|garena|gaslite|facebook|//\d+\.connect|@INFECTLOGS',
                 original, _re.IGNORECASE
             ))
-            processed = process_line(original)
+            processed = _process_line(original)
             if processed and processed not in seen:
                 credentials.append(processed)
                 seen.add(processed)
