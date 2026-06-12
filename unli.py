@@ -74,7 +74,7 @@ PRICING_TEXT = (
     "  Unlimited checking (no daily cap)\n"
     "  No waiting in line\n"
     "  Higher priority over free users\n"
-    "  8 threads (faster checking)\n"
+    "  5 threads (faster checking)\n"
     "  Access to all premium features\n\n"
     "━━━━━━━━━━━━━━━━━━━━━━━━\n"
     "  <b>HOW TO PAY</b>\n"
