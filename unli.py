@@ -1123,6 +1123,10 @@ def format_hit_plain(login, password, data):
     current_rank_game  = gd.get("current_rank", "")
     display_rank       = current_rank_game if current_rank_game else data.get("rank", "?")
     display_highest    = high_rank_game if high_rank_game else data.get("highest_rank", "?")
+    v2l_status         = gd.get("v2l_status") or data.get("v2l_status") or "N/A"
+    v2l_upper          = str(v2l_status).strip().upper()
+    v2l_active         = v2l_upper not in ("N/A", "", "NONE", "FALSE", "0", "NO", "NOT ELIGIBLE", "INELIGIBLE")
+    v2l_display        = "YES" if v2l_active else "NO"
     ban_expired, expire_date = parse_ban_expired(ban_reason, ban_expires)
     if banned and ban_expired:
         banned = False
@@ -1133,6 +1137,7 @@ def format_hit_plain(login, password, data):
              f"LOGIN: {login}:{password}",
              f"NAME: {name}",
              f"LEVEL: {level}",
+             f"V2L: {v2l_display}",
              f"CURRENT RANK: {display_rank}",
              f"HIGHEST RANK: {display_highest}",
              f"BINDINGS: {bind_str}",
@@ -1327,8 +1332,7 @@ def build_stats_msg(st_obj):
     msg += f"  EmailPass  <code>{mb(emp,max(v,1))}</code>  {emp}\n"
     msg += f"  UserPass   <code>{mb(usp,max(v,1))}</code>  {usp}\n"
     msg += f"{sep}\n"
-    msg += f"<b>Rate</b>     {rate:.2f} acc/s\n"
-    msg += f"<b>CPM</b>      {cpm:.1f}/min\n"
+    msg += f"<b>Rate</b>     {rate:.2f} acc/s  ({cpm:.1f}/min)\n"
     msg += f"<b>ETA</b>      {eta_str}\n"
     msg += f"<b>Elapsed</b>  {elapsed_str}\n"
 
