@@ -30,7 +30,7 @@ from telegram.error import RetryAfter
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-TOKEN    = "8708139714:AAHgYyAfo4riaCvkCK-LmpBBlEOL1HDErwQ"
+TOKEN    = "8559644982:AAGAXEyZrnWSpRtQguVDJXXKWBadCMaZ5XE"
 ADMIN_ID = 5674812663
 CHANNEL  = "nixzllss"
 
