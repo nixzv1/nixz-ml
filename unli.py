@@ -125,16 +125,15 @@ free_queue_active  = set()
 
 print_lock = threading.Lock()
 
-def _safe_threadsafe(coro, loop, retries=5):
-    for attempt in range(retries):
-        try:
-            fut = _safe_threadsafe(coro, loop)
-            return fut.result(timeout=30)
-        except RetryAfter as e:
-            time.sleep(e.retry_after + 1)
-        except Exception:
-            return None
-    return None
+def _safe_threadsafe(coro, loop):
+    try:
+        fut = asyncio.run_coroutine_threadsafe(coro, loop)
+        return fut.result(timeout=30)
+    except RetryAfter as e:
+        time.sleep(e.retry_after + 1)
+        return None
+    except Exception:
+        return None
 
 async def _safe_send(coro, retries=5):
     for attempt in range(retries):
@@ -1382,7 +1381,7 @@ def fetch_stock_summary():
 
 def fetch_akamai_stock():
     try:
-        r = requests.get(AKAMAI_API, timeout=8)
+        r = requests.get(AKAMAI_API, timeout=6)
         d = r.json()
         pool   = d.get("pool_size", "?")
         served = d.get("tokens_served", "?")
@@ -1398,13 +1397,17 @@ def fetch_akamai_stock():
 
 def fetch_cn31_stock():
     try:
-        r = requests.get(CN31_API, timeout=10)
+        r = requests.get(CN31_API, timeout=6)
         d = r.json()
-        pool      = d.get("pool_size") or d.get("pool") or d.get("count") or d.get("total") or d.get("size") or "?"
-        served    = d.get("tokens_served") or d.get("served") or d.get("used") or d.get("total_served") or "?"
-        workers   = d.get("active_workers") or d.get("workers") or d.get("solver_count") or "?"
-        generated = d.get("tokens_generated") or d.get("generated") or d.get("total_generated") or "?"
+        pool      = d.get("pool_size", "?")
+        served    = d.get("tokens_served", "?")
+        workers   = d.get("active_workers", "?")
+        generated = d.get("tokens_generated", "?")
         return pool, served, workers, generated
+    except requests.exceptions.ConnectTimeout:
+        return "OFFLINE", "OFFLINE", "OFFLINE", "OFFLINE"
+    except requests.exceptions.ConnectionError:
+        return "UNREACHABLE", "UNREACHABLE", "UNREACHABLE", "UNREACHABLE"
     except Exception:
         return "N/A", "N/A", "N/A", "N/A"
 
@@ -1639,7 +1642,7 @@ def _start_stats_updater(chat_id, context, st_obj, app_loop, uid):
             done    = checked >= total
             try:
                 kb = None if done else InlineKeyboardMarkup([[InlineKeyboardButton("⏹ STOP", callback_data="stop_check")]])
-                fut = _safe_threadsafe(
+                _safe_threadsafe(
                     context.bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=msg_id,
@@ -1649,7 +1652,6 @@ def _start_stats_updater(chat_id, context, st_obj, app_loop, uid):
                     ),
                     app_loop
                 )
-                fut.result(timeout=5)
             except Exception:
                 pass
             if done:
@@ -3892,7 +3894,7 @@ async def receive_semi_email(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 done    = checked >= total
                 try:
                     kb = None if done else InlineKeyboardMarkup([[InlineKeyboardButton("⏹ STOP", callback_data="stop_check")]])
-                    fut = _safe_threadsafe(
+                    _safe_threadsafe(
                         context.bot.edit_message_text(
                             chat_id=chat_id,
                             message_id=msg_id,
@@ -3902,7 +3904,6 @@ async def receive_semi_email(update: Update, context: ContextTypes.DEFAULT_TYPE)
                         ),
                         app_loop
                     )
-                    fut.result(timeout=5)
                 except Exception:
                     pass
                 if done:
