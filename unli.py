@@ -1637,20 +1637,20 @@ def check_single_thread(login, password, uid, chat_id, context, st_obj, app_loop
                 continue
 
         if status == "valid":
-            banned = data.get("banned", False)
+            banned         = data.get("banned", False)
             ban_expired, _ = parse_ban_expired(data.get("ban_reason", ""), data.get("ban_expires", ""))
 
-            gd                = data.get("game_data", {})
-            current_rank_game = gd.get("current_rank", "")
-            display_rank      = current_rank_game if current_rank_game else data.get("rank", "?")
-            collector_tier    = gd.get("collector_tier", "N/A")
-            region            = data.get("region", "?")
-            name              = data.get("name", "?")
-            level             = data.get("level", "?")
-            v2l_status        = gd.get("v2l_status", "") or ""
-            v2l_active        = str(v2l_status).strip().upper() not in ("", "N/A", "NONE", "FALSE", "0", "NO", "NOT ELIGIBLE", "INELIGIBLE")
+            gd                 = data.get("game_data", {})
+            current_rank_game  = gd.get("current_rank", "")
+            display_rank       = current_rank_game if current_rank_game else data.get("rank", "?")
+            collector_tier     = gd.get("collector_tier", "N/A")
+            region             = data.get("region", "?")
+            name               = data.get("name", "?")
+            level              = data.get("level", "?")
+            v2l_status         = gd.get("v2l_status", "") or ""
+            v2l_active         = str(v2l_status).strip().upper() not in ("", "N/A", "NONE", "FALSE", "0", "NO", "NOT ELIGIBLE", "INELIGIBLE")
             is_actually_banned = banned and not ban_expired
-            is_email = is_email_account(login)
+            is_email           = is_email_account(login)
 
             with lock:
                 st_obj["valid"]   += 1
@@ -1673,25 +1673,29 @@ def check_single_thread(login, password, uid, chat_id, context, st_obj, app_loop
             with lock:
                 if is_actually_banned:
                     st_obj.setdefault("ban_lines", []).append(plain_text)
-                elif v2l_active:
-                    st_obj.setdefault("v2l_on_lines",  []).append(plain_text)
-                    st_obj.setdefault("valid_lines",    []).append(plain_text)
                 else:
-                    st_obj.setdefault("v2l_off_lines", []).append(plain_text)
-                st_obj.setdefault("valid_lines",   []).append(plain_text)
+                    if v2l_active:
+                        st_obj.setdefault("v2l_on_lines",  []).append(plain_text)
+                    else:
+                        st_obj.setdefault("v2l_off_lines", []).append(plain_text)
+                    st_obj.setdefault("valid_lines", []).append(plain_text)
             time.sleep(0.05)
+            return
 
         elif status == "invalid":
             with lock:
                 st_obj["invalid"] += 1
                 st_obj["checked"] += 1
+            return
 
         else:
+            if retry_enabled:
+                time.sleep(1)
+                continue
             with lock:
                 st_obj["errors"]  += 1
                 st_obj["checked"] += 1
-
-        return
+            return
 
 
 def _update_live_stats(chat_id, context, st_obj, app_loop):
