@@ -30,9 +30,9 @@ from telegram.error import RetryAfter
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-TOKEN    = "8559644982:AAGAXEyZrnWSpRtQguVDJXXKWBadCMaZ5XE"
-ADMIN_ID = 5674812663
-CHANNEL  = "nixzllss"
+TOKEN    = "8909716394:AAE0MT6AIgm_i4ILQqeBwMIomz9ZOlW_uOI"
+ADMIN_ID = 8595414927
+CHANNEL  = "nixzllls"
 
 API_URL      = "http://144.91.112.169:4040/check"
 AKAMAI_API   = "http://5.189.140.181:3030/api/status"
